@@ -15,11 +15,12 @@ const products = [
       "A relaxed essential made for effortless everyday dressing. Clean lines, a timeless silhouette and a versatile look that moves with you.",
     sizes: ["S", "M", "L", "XL"],
     images: [
-      "https://images.unsplash.com/photo-1596755090480-1f7c4f5c7a9c?auto=format&fit=crop&w=1000&q=85",
-      "https://images.unsplash.com/photo-1603252110481-7ba873bf42ab?auto=format&fit=crop&w=1000&q=85",
-      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?auto=format&fit=crop&w=1000&q=85",
+      "https://static.zara.net/assets/public/2a3b/4235/30ef4b9fa2f2/292449d6a45d/00881403681-e1/00881403681-e1.jpg?ts=1791908197409&w=1920",
+      "https://images.unsplash.com/photo-1603252110481-7ba873bf42ab?auto=format&fit=crop&w=1000&q=90",
+      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?auto=format&fit=crop&w=1000&q=90",
     ],
   },
+
   {
     id: 2,
     name: "Everyday Cotton Tee",
@@ -35,11 +36,12 @@ const products = [
       "A soft cotton staple with a clean shape and comfortable feel. Made for everyday layering or wearing on its own.",
     sizes: ["S", "M", "L", "XL"],
     images: [
-      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=1000&q=85",
-      "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=1000&q=85",
-      "https://images.unsplash.com/photo-1529374255404-311a2a4f1fd9?auto=format&fit=crop&w=1000&q=85",
+      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=1000&q=90",
+      "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=1000&q=90",
+      "https://images.unsplash.com/photo-1529374255404-311a2a4f1fd9?auto=format&fit=crop&w=1000&q=90",
     ],
   },
+
   {
     id: 3,
     name: "Soft Structure Top",
@@ -55,11 +57,12 @@ const products = [
       "An understated piece designed with a soft structure and effortless silhouette. A versatile essential for everyday styling.",
     sizes: ["XS", "S", "M", "L"],
     images: [
-      "https://images.unsplash.com/photo-1551163943-3f6a6a8b8d1a?auto=format&fit=crop&w=1000&q=85",
-      "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1000&q=85",
-      "https://images.unsplash.com/photo-1485230895905-ec40ba36b9bc?auto=format&fit=crop&w=1000&q=85",
+      "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1000&q=90",
+      "https://images.unsplash.com/photo-1485230895905-ec40ba36b9bc?auto=format&fit=crop&w=1000&q=90",
+      "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1000&q=90",
     ],
   },
+
   {
     id: 4,
     name: "Classic Straight Denim",
@@ -75,9 +78,9 @@ const products = [
       "Classic straight-leg denim with a timeless look. An easy wardrobe staple designed to pair with everything.",
     sizes: ["26", "28", "30", "32", "34"],
     images: [
-      "https://images.unsplash.com/photo-1541099649105-f69ad21f3246?auto=format&fit=crop&w=1000&q=85",
-      "https://images.unsplash.com/photo-1542272604-787c3835535d?auto=format&fit=crop&w=1000&q=85",
-      "https://images.unsplash.com/photo-1548883354-94bcfe321c77?auto=format&fit=crop&w=1000&q=85",
+      "https://images.unsplash.com/photo-1541099649105-f69ad21f3246?auto=format&fit=crop&w=1000&q=90",
+      "https://images.unsplash.com/photo-1542272604-787c3835535d?auto=format&fit=crop&w=1000&q=90",
+      "https://images.unsplash.com/photo-1548883354-94bcfe321c77?auto=format&fit=crop&w=1000&q=90",
     ],
   },
 ];

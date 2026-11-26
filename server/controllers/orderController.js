@@ -1,10 +1,18 @@
 
 const crypto = require("crypto");
+
+
 const {
   getOrderByOrderNumberAndPhone,
   getWalletPayments,
+  getAdminPaymentAnalytics,
+  getMonthlyPaymentAnalytics,
+  
 } = require("../models/orderModel");
-const { createOrder } = require("../models/orderModel");
+const {
+  createOrder,
+  validateOrderItems,
+} = require("../models/orderModel");
 
 const fs = require("fs");
 const path = require("path");
@@ -18,13 +26,9 @@ const {
 
 const placeOrder = async (req, res) => {
   try {
-    const {
-      customer,
-      items,
-      payment_method,
-    } = req.body;
+    const { customer, items, payment_method } = req.body;
 
-    // Validate customer details
+    // 1. Validate customer details
     const requiredFields = [
       "name",
       "phone",
@@ -34,7 +38,11 @@ const placeOrder = async (req, res) => {
     ];
 
     for (const field of requiredFields) {
-      if (!customer || !customer[field] || !String(customer[field]).trim()) {
+      if (
+        !customer ||
+        !customer[field] ||
+        !String(customer[field]).trim()
+      ) {
         return res.status(400).json({
           success: false,
           message: `Customer ${field} is required.`,
@@ -42,26 +50,37 @@ const placeOrder = async (req, res) => {
       }
     }
 
-    // Validate phone number
-    const phoneRegex = /^\+?[\d\s-]{10,20}$/;
+    // 2. Validate phone number
+    const phone = String(customer.phone).replace(/[\s-]/g, "");
 
-    if (!phoneRegex.test(customer.phone.trim())) {
+    const phoneRegex = /^(?:\+92|0)?3\d{9}$/;
+
+    if (!phoneRegex.test(phone)) {
       return res.status(400).json({
         success: false,
-        message: "Please enter a valid phone number.",
+        message: "Please enter a valid Pakistan mobile number.",
       });
     }
 
-    // Validate email if provided
-    if (customer.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email)) {
+    // 3. Validate email
+    const email = String(customer.email || "").trim();
+
+    if (
+      email &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ) {
       return res.status(400).json({
         success: false,
         message: "Please enter a valid email address.",
       });
     }
 
-    // Validate payment method
-    const allowedPayments = ["cod", "easypaisa", "jazzcash"];
+    // 4. Validate payment method
+    const allowedPayments = [
+      "cod",
+      "easypaisa",
+      "jazzcash",
+    ];
 
     if (!allowedPayments.includes(payment_method)) {
       return res.status(400).json({
@@ -70,7 +89,7 @@ const placeOrder = async (req, res) => {
       });
     }
 
-    // Validate items
+    // 5. Validate cart
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
@@ -78,72 +97,45 @@ const placeOrder = async (req, res) => {
       });
     }
 
-    for (const item of items) {
-      if (
-        !Number.isInteger(Number(item.product_id)) ||
-        Number(item.product_id) <= 0 ||
-        !item.product_name ||
-        !item.size ||
-        !Number.isInteger(Number(item.quantity)) ||
-        Number(item.quantity) < 1 ||
-        !Number.isFinite(Number(item.unit_price)) ||
-        Number(item.unit_price) <= 0
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "One or more order items are invalid.",
-        });
-      }
-    }
+    // 6. Validate products using database prices and variants
+    const orderItems = await validateOrderItems(items);
 
-    // Calculate totals
-    const subtotal = items.reduce(
-      (total, item) =>
-        total + Number(item.unit_price) * Number(item.quantity),
+    // 7. Calculate subtotal
+    const subtotal = orderItems.reduce(
+      (total, item) => total + item.total_price,
       0
     );
 
+    // 8. Calculate shipping
     const shipping_fee = subtotal >= 10000 ? 0 : 500;
+
     const total_amount = subtotal + shipping_fee;
 
-    // Generate unique order number
-    const order_number = `RVL-${Date.now()}-${crypto
-      .randomBytes(3)
-      .toString("hex")
-      .toUpperCase()}`;
+    // 9. Generate unique order number
+    const orderNumber =
+      `RIV-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 
-    // Prepare customer/order data
+    // 10. Prepare order data
     const orderData = {
-      order_number,
-      customer_name: customer.name.trim(),
-      phone: customer.phone.trim(),
-      email: customer.email?.trim() || null,
-      province: customer.province.trim(),
-      city: customer.city.trim(),
-      postal_code: customer.postal_code?.trim() || null,
-      address: customer.address.trim(),
-      order_notes: customer.order_notes?.trim() || null,
+      order_number: orderNumber,
+      customer_name: String(customer.name).trim(),
+      phone,
+      email: email || null,
+      province: String(customer.province).trim(),
+      city: String(customer.city).trim(),
+      postal_code: String(customer.postal_code || "").trim(),
+      address: String(customer.address).trim(),
+      order_notes: String(customer.order_notes || "").trim(),
       payment_method,
       subtotal,
       shipping_fee,
       total_amount,
     };
 
-    // Prepare order items
-    const orderItems = items.map((item) => ({
-      product_id: Number(item.product_id),
-      product_name: item.product_name,
-      product_image: item.product_image || null,
-      size: item.size,
-      color: item.color || null,
-      quantity: Number(item.quantity),
-      unit_price: Number(item.unit_price),
-      total_price: Number(item.unit_price) * Number(item.quantity),
-    }));
-
-    // Save order to database
+    // 11. Save order and update stock atomically
     const savedOrder = await createOrder(orderData, orderItems);
 
+    // 12. Return successful response
     return res.status(201).json({
       success: true,
       message: "Order placed successfully!",
@@ -161,15 +153,36 @@ const placeOrder = async (req, res) => {
             : "Payment Verification Pending",
       },
     });
-  } catch (error) {
-    console.error("Place order error:", error.message);
 
-    return res.status(500).json({
+  } catch (error) {
+    console.error("Place order error:", error);
+
+    const validationErrors = [
+      "Invalid product",
+      "Invalid product variant",
+      "variant",
+      "unavailable",
+      "insufficient stock",
+      "inactive",
+      "Invalid product price",
+      "selected size or color",
+      "Stock update failed",
+    ];
+
+    const isValidationError = validationErrors.some(
+      (message) =>
+        error.message.toLowerCase().includes(message.toLowerCase())
+    );
+
+    return res.status(isValidationError ? 409 : 500).json({
       success: false,
-      message: "Unable to place your order. Please try again.",
+      message: isValidationError
+        ? error.message
+        : "Unable to place your order. Please try again.",
     });
   }
 };
+
 
 const lookupOrder = async (req, res) => {
   try {
@@ -484,6 +497,125 @@ const viewPaymentProof = async (req, res) => {
     }
   }
 };
+// Get payment analytics for admin dashboard
+const getAdminPaymentAnalyticsController = async (req, res) => {
+  try {
+    const analytics = await getAdminPaymentAnalytics();
+
+    return res.status(200).json({
+      success: true,
+      analytics,
+    });
+  } catch (error) {
+    console.error("Admin payment analytics error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch payment analytics.",
+    });
+  }
+};
+// Get monthly payment comparison analytics for admin
+const getMonthlyPaymentAnalyticsController = async (req, res) => {
+  try {
+    const analytics = await getMonthlyPaymentAnalytics();
+
+    return res.status(200).json({
+      success: true,
+      analytics,
+    });
+  } catch (error) {
+    console.error("Monthly payment analytics error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch monthly payment analytics.",
+    });
+  }
+};
+// Fetch and validate product price from database
+const getValidatedOrderItems = async (items) => {
+  const validatedItems = [];
+
+  for (const item of items) {
+    const productId = Number(item.product_id);
+    const quantity = Number(item.quantity);
+
+    // Get active product
+    const product = await new Promise((resolve, reject) => {
+      db.query(
+        `SELECT id, name, price, sale_price, is_active
+         FROM products
+         WHERE id = ?`,
+        [productId],
+        (error, results) => {
+          if (error) return reject(error);
+          resolve(results[0]);
+        }
+      );
+    });
+
+    if (!product || Number(product.is_active) !== 1) {
+      throw new Error(`Product ${productId} is unavailable.`);
+    }
+
+    // Validate selected size and color against active variant
+    const variant = await new Promise((resolve, reject) => {
+      db.query(
+        `SELECT id, size, color, price_override, stock_quantity, is_active
+         FROM product_variants
+         WHERE product_id = ?
+           AND size = ?
+           AND color = ?
+         LIMIT 1`,
+        [productId, item.size, item.color],
+        (error, results) => {
+          if (error) return reject(error);
+          resolve(results[0]);
+        }
+      );
+    });
+
+    if (!variant || Number(variant.is_active) !== 1) {
+      throw new Error(
+        `${product.name} is unavailable in the selected size/color.`
+      );
+    }
+
+    if (Number(variant.stock_quantity || 0) < quantity) {
+      throw new Error(
+        `Insufficient stock for ${product.name} (${item.size}, ${item.color}).`
+      );
+    }
+
+    const basePrice =
+      product.sale_price !== null &&
+      product.sale_price !== undefined &&
+      Number(product.sale_price) > 0
+        ? Number(product.sale_price)
+        : Number(product.price);
+
+    const unitPrice =
+      variant.price_override !== null &&
+      variant.price_override !== undefined &&
+      Number(variant.price_override) > 0
+        ? Number(variant.price_override)
+        : basePrice;
+
+    validatedItems.push({
+      product_id: product.id,
+      product_name: product.name,
+      product_image: null,
+      size: variant.size,
+      color: variant.color,
+      quantity,
+      unit_price: unitPrice,
+      total_price: unitPrice * quantity,
+    });
+  }
+
+  return validatedItems;
+};
 module.exports = {
   placeOrder,
   lookupOrder,
@@ -492,4 +624,6 @@ module.exports = {
   verifyPayment,
   getAdminPayments,
   viewPaymentProof,
+  getAdminPaymentAnalyticsController,
+  getMonthlyPaymentAnalyticsController,
 };

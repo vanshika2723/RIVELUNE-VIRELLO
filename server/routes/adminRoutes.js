@@ -1,3 +1,4 @@
+
 const express = require("express");
 const router = express.Router();
 
@@ -8,6 +9,8 @@ const {
   viewPaymentProof,
   verifyPayment,
   rejectPayment,
+  getAdminPaymentAnalyticsController,
+  getMonthlyPaymentAnalyticsController,
 } = require("../controllers/orderController");
 
 // Protected admin payments list
@@ -32,6 +35,20 @@ router.post(
   "/payments/reject",
   adminAuth,
   rejectPayment
+);
+
+// Protected admin payment analytics
+router.get(
+  "/payments/analytics",
+  adminAuth,
+  getAdminPaymentAnalyticsController
+);
+
+// Protected monthly payment comparison analytics
+router.get(
+  "/payments/monthly-analytics",
+  adminAuth,
+  getMonthlyPaymentAnalyticsController
 );
 
 module.exports = router;

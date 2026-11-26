@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   ShieldCheck,
   Clock,
@@ -10,20 +10,225 @@ import {
   Eye,
   Image,
   X,
+  Download,
+  TrendingUp,
+  ShoppingBag,
+  Wallet,
+  RefreshCw,
+  ArrowUpRight,
+  ArrowDownRight,
 } from "lucide-react";
 import "../index.css";
 
 const API_URL =
   import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
+const formatPKR = (amount) =>
+  `PKR ${Number(amount || 0).toLocaleString("en-PK", {
+    maximumFractionDigits: 0,
+  })}`;
+
+const formatDate = (date) => {
+  if (!date) return "-";
+
+  return new Date(date).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+// Simple SVG chart - no external chart package required
+function RevenueTrendChart({ data = [] }) {
+  const chartData = useMemo(() => {
+    const last7Days = [...data];
+
+    return last7Days;
+  }, [data]);
+
+  if (!chartData.length) {
+    return (
+      <div className="analytics-chart-empty">
+        No order activity found for the last 7 days.
+      </div>
+    );
+  }
+
+  const width = 700;
+  const height = 260;
+  const paddingLeft = 48;
+  const paddingRight = 20;
+  const paddingTop = 20;
+  const paddingBottom = 42;
+
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  const maxValue = Math.max(
+    ...chartData.map((item) => Number(item.total_amount || 0)),
+    1
+  );
+
+  const points = chartData.map((item, index) => {
+    const x =
+      chartData.length === 1
+        ? paddingLeft + chartWidth / 2
+        : paddingLeft +
+          (index / (chartData.length - 1)) * chartWidth;
+
+    const y =
+      paddingTop +
+      chartHeight -
+      (Number(item.total_amount || 0) / maxValue) * chartHeight;
+
+    return {
+      x,
+      y,
+      amount: Number(item.total_amount || 0),
+      orders: Number(item.total_orders || 0),
+      date: item.date,
+    };
+  });
+
+  const linePath = points
+    .map((point, index) =>
+      `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`
+    )
+    .join(" ");
+
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${
+    paddingTop + chartHeight
+  } L ${points[0].x} ${paddingTop + chartHeight} Z`;
+
+  return (
+    <div className="analytics-chart-wrapper">
+      <div className="analytics-chart-legend">
+        <span className="analytics-legend-dot" />
+        <span>Order Value</span>
+      </div>
+
+      <div className="analytics-chart-scroll">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="analytics-chart-svg"
+          role="img"
+          aria-label="Daily order value trend for the last seven days"
+        >
+          {/* Grid lines */}
+          {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+            const y = paddingTop + chartHeight * ratio;
+            const value = Math.round(maxValue * (1 - ratio));
+
+            return (
+              <g key={ratio}>
+                <line
+                  x1={paddingLeft}
+                  y1={y}
+                  x2={width - paddingRight}
+                  y2={y}
+                  stroke="#ebe6df"
+                  strokeDasharray="4 5"
+                />
+                <text
+                  x={paddingLeft - 8}
+                  y={y + 4}
+                  textAnchor="end"
+                  fontSize="10"
+                  fill="#8b8176"
+                >
+                  {value.toLocaleString()}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Area */}
+          <path d={areaPath} fill="rgba(184, 139, 82, 0.12)" />
+
+          {/* Trend line */}
+          <path
+            d={linePath}
+            fill="none"
+            stroke="#b88b52"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+
+          {/* Data points and labels */}
+          {points.map((point, index) => (
+            <g key={index}>
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r="5"
+                fill="#b88b52"
+                stroke="#fff"
+                strokeWidth="2"
+              />
+
+              <text
+                x={point.x}
+                y={height - 12}
+                textAnchor="middle"
+                fontSize="11"
+                fill="#80776c"
+              >
+                {point.date
+                  ? new Date(point.date).toLocaleDateString("en", {
+                      day: "numeric",
+                      month: "short",
+                    })
+                  : ""}
+              </text>
+            </g>
+          ))}
+        </svg>
+      </div>
+
+      <div className="analytics-chart-summary">
+        <div>
+          <span>Total orders (7 days)</span>
+          <strong>
+            {chartData.reduce(
+              (total, item) => total + Number(item.total_orders || 0),
+              0
+            )}
+          </strong>
+        </div>
+
+        <div>
+          <span>Order value (7 days)</span>
+          <strong>
+            {formatPKR(
+              chartData.reduce(
+                (total, item) => total + Number(item.total_amount || 0),
+                0
+              )
+            )}
+          </strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminPayments() {
   const [activeTab, setActiveTab] = useState("pending");
-
+const [monthlyAnalytics, setMonthlyAnalytics] = useState(null);
+const [monthlyLoading, setMonthlyLoading] = useState(true);
+const [monthlyError, setMonthlyError] = useState("");
   const [payments, setPayments] = useState({
     pending: [],
     verified: [],
     rejected: [],
   });
+
+  // Analytics state
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [analyticsError, setAnalyticsError] = useState("");
+  const [analyticsRefresh, setAnalyticsRefresh] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -35,30 +240,133 @@ function AdminPayments() {
   const [rejectPayment, setRejectPayment] = useState(null);
   const [rejectionReason, setRejectionReason] = useState("");
 
-  
-
-  // Payment proof viewer state
+  // Payment proof viewer
   const [proofUrl, setProofUrl] = useState(null);
   const [proofLoading, setProofLoading] = useState(false);
   const [proofError, setProofError] = useState("");
   const [proofOrderNumber, setProofOrderNumber] = useState("");
 
-  // Clean up image URL when modal closes or component unmounts
+  // Search, dates and sorting
+  const [paymentSearch, setPaymentSearch] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [paymentSort, setPaymentSort] = useState("newest");
+
+  // Clean up proof image object URL
   useEffect(() => {
     return () => {
-      if (proofUrl) {
-        URL.revokeObjectURL(proofUrl);
-      }
+      if (proofUrl) URL.revokeObjectURL(proofUrl);
     };
   }, [proofUrl]);
 
+  // Close proof viewer
   const closeProofViewer = () => {
     setProofUrl(null);
     setProofError("");
     setProofOrderNumber("");
   };
 
-  // Fetch protected payment proof
+  // Fetch analytics
+  useEffect(() => {
+    const fetchAnalytics = async () => {
+      const token = sessionStorage.getItem("rivelune_admin_token");
+
+      if (!token) {
+        window.location.href = "/admin/login";
+        return;
+      }
+
+      setAnalyticsLoading(true);
+      setAnalyticsError("");
+
+      try {
+        const response = await fetch(
+          `${API_URL}/admin/payments/analytics`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        const data = await response.json();
+
+        if (response.status === 401) {
+          sessionStorage.removeItem("rivelune_admin_token");
+          sessionStorage.removeItem("rivelune_admin");
+          window.location.href = "/admin/login";
+          return;
+        }
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message || "Failed to load analytics."
+          );
+        }
+
+        setAnalytics(data.analytics);
+      } catch (err) {
+        setAnalyticsError(
+          err.message || "Unable to load analytics data."
+        );
+      } finally {
+        setAnalyticsLoading(false);
+      }
+    };
+
+    fetchAnalytics();
+  }, [analyticsRefresh]);
+// Fetch monthly comparison analytics
+useEffect(() => {
+  const fetchMonthlyAnalytics = async () => {
+    const token = sessionStorage.getItem("rivelune_admin_token");
+
+    if (!token) {
+      window.location.href = "/admin/login";
+      return;
+    }
+
+    setMonthlyLoading(true);
+    setMonthlyError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/admin/payments/monthly-analytics`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.status === 401) {
+        sessionStorage.removeItem("rivelune_admin_token");
+        sessionStorage.removeItem("rivelune_admin");
+        window.location.href = "/admin/login";
+        return;
+      }
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to load monthly analytics."
+        );
+      }
+
+      setMonthlyAnalytics(data.analytics);
+    } catch (err) {
+      setMonthlyError(
+        err.message || "Unable to load monthly analytics."
+      );
+    } finally {
+      setMonthlyLoading(false);
+    }
+  };
+
+  fetchMonthlyAnalytics();
+}, [analyticsRefresh]);
+  // View protected payment proof
   const handleViewProof = async (payment) => {
     const token = sessionStorage.getItem("rivelune_admin_token");
 
@@ -99,8 +407,7 @@ function AdminPayments() {
         throw new Error("The uploaded proof is not a valid image.");
       }
 
-      const objectUrl = URL.createObjectURL(blob);
-      setProofUrl(objectUrl);
+      setProofUrl(URL.createObjectURL(blob));
     } catch (err) {
       setProofError(err.message || "Failed to load payment proof.");
     } finally {
@@ -108,7 +415,7 @@ function AdminPayments() {
     }
   };
 
-  // Verify wallet payment
+  // Verify payment
   const handleVerifyPayment = async (payment) => {
     const confirmed = window.confirm(
       `Verify payment for Order #${payment.order_number}?`
@@ -134,9 +441,7 @@ function AdminPayments() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          order_id: payment.id,
-        }),
+        body: JSON.stringify({ order_id: payment.id }),
       });
 
       const data = await response.json();
@@ -156,9 +461,7 @@ function AdminPayments() {
 
       setPayments((prev) => ({
         ...prev,
-        pending: prev.pending.filter(
-          (item) => item.id !== payment.id
-        ),
+        pending: prev.pending.filter((item) => item.id !== payment.id),
         verified: [
           {
             ...payment,
@@ -169,6 +472,8 @@ function AdminPayments() {
           ...prev.verified,
         ],
       }));
+
+      setAnalyticsRefresh((prev) => prev + 1);
     } catch (err) {
       setActionError(err.message || "Unable to verify payment.");
       setActionSuccess("");
@@ -177,7 +482,7 @@ function AdminPayments() {
     }
   };
 
-  // Open rejection modal
+  // Open reject modal
   const handleRejectPayment = (payment) => {
     setRejectPayment(payment);
     setRejectionReason("");
@@ -185,7 +490,7 @@ function AdminPayments() {
     setActionSuccess("");
   };
 
-  // Close rejection modal
+  // Close reject modal
   const closeRejectModal = () => {
     if (actionLoading === rejectPayment?.id) return;
 
@@ -194,7 +499,7 @@ function AdminPayments() {
     setActionError("");
   };
 
-  // Submit payment rejection
+  // Submit rejection
   const submitRejectPayment = async () => {
     if (!rejectPayment) return;
 
@@ -262,6 +567,7 @@ function AdminPayments() {
 
       setRejectPayment(null);
       setRejectionReason("");
+      setAnalyticsRefresh((prev) => prev + 1);
     } catch (err) {
       setActionError(err.message || "Unable to reject payment.");
       setActionSuccess("");
@@ -270,14 +576,14 @@ function AdminPayments() {
     }
   };
 
+  // Admin logout
   const handleLogout = () => {
     sessionStorage.removeItem("rivelune_admin_token");
     sessionStorage.removeItem("rivelune_admin");
-
     window.location.href = "/admin/login";
   };
 
-  // Fetch payments
+  // Fetch payment records
   useEffect(() => {
     const fetchPayments = async () => {
       const token = sessionStorage.getItem("rivelune_admin_token");
@@ -292,18 +598,9 @@ function AdminPayments() {
         setError("");
 
         const statuses = [
-          {
-            key: "pending",
-            status: "Payment Verification Pending",
-          },
-          {
-            key: "verified",
-            status: "Payment Verified",
-          },
-          {
-            key: "rejected",
-            status: "Payment Rejected",
-          },
+          { key: "pending", status: "Payment Verification Pending" },
+          { key: "verified", status: "Payment Verified" },
+          { key: "rejected", status: "Payment Rejected" },
         ];
 
         const results = await Promise.all(
@@ -345,66 +642,238 @@ function AdminPayments() {
     fetchPayments();
   }, []);
 
+  // Counts
   const pendingCount = payments.pending.length;
   const verifiedCount = payments.verified.length;
   const rejectedCount = payments.rejected.length;
 
   const currentPayments = payments[activeTab];
 
-  // Payment Search
-const [paymentSearch, setPaymentSearch] = useState("");
+  // Search and date filtering
+  const filteredPayments = currentPayments.filter((payment) => {
+    const search = paymentSearch.trim().toLowerCase();
 
-// Payment Date Filters
-const [startDate, setStartDate] = useState("");
-const [endDate, setEndDate] = useState("");
+    const matchesSearch =
+      !search ||
+      String(payment.order_number || "").toLowerCase().includes(search) ||
+      String(payment.customer_name || "").toLowerCase().includes(search) ||
+      String(payment.phone || "").toLowerCase().includes(search) ||
+      String(payment.transaction_id || "").toLowerCase().includes(search) ||
+      String(payment.payment_method || "").toLowerCase().includes(search);
 
-const filteredPayments = currentPayments.filter((payment) => {
-  const search = paymentSearch.trim().toLowerCase();
+    const paymentDate = payment.created_at
+      ? new Date(payment.created_at)
+      : null;
 
-  const matchesSearch =
-    !search ||
-    String(payment.order_number || "").toLowerCase().includes(search) ||
-    String(payment.customer_name || "").toLowerCase().includes(search) ||
-    String(payment.phone || "").toLowerCase().includes(search) ||
-    String(payment.transaction_id || "").toLowerCase().includes(search) ||
-    String(payment.payment_method || "").toLowerCase().includes(search);
+    const matchesStartDate =
+      !startDate ||
+      (paymentDate && paymentDate >= new Date(`${startDate}T00:00:00`));
 
-  const paymentDate = payment.created_at
-    ? new Date(payment.created_at)
-    : null;
+    const matchesEndDate =
+      !endDate ||
+      (paymentDate &&
+        paymentDate <= new Date(`${endDate}T23:59:59.999`));
 
-  const matchesStartDate =
-    !startDate ||
-    (paymentDate &&
-      paymentDate >= new Date(`${startDate}T00:00:00`));
+    return matchesSearch && matchesStartDate && matchesEndDate;
+  });
 
-  const matchesEndDate =
-    !endDate ||
-    (paymentDate &&
-      paymentDate <= new Date(`${endDate}T23:59:59.999`));
+  // Sort payments
+  const sortedPayments = [...filteredPayments].sort((a, b) => {
+    switch (paymentSort) {
+      case "oldest":
+        return Number(a.id) - Number(b.id);
 
-  return matchesSearch && matchesStartDate && matchesEndDate;
-});
+      case "highest":
+        return Number(b.total_amount || 0) - Number(a.total_amount || 0);
 
-// Payment Sorting
-const [paymentSort, setPaymentSort] = useState("newest");
+      case "lowest":
+        return Number(a.total_amount || 0) - Number(b.total_amount || 0);
 
-const sortedPayments = [...filteredPayments].sort((a, b) => {
-  switch (paymentSort) {
-    case "oldest":
-      return Number(a.id) - Number(b.id);
+      case "newest":
+      default:
+        return Number(b.id) - Number(a.id);
+    }
+  });
 
-    case "highest":
-      return Number(b.total_amount || 0) - Number(a.total_amount || 0);
+  // Export filtered and sorted payments to CSV
+  const handleExportPayments = () => {
+    if (!sortedPayments.length) return;
 
-    case "lowest":
-      return Number(a.total_amount || 0) - Number(b.total_amount || 0);
+    const headers = [
+      "Order Number",
+      "Customer Name",
+      "Phone",
+      "Amount",
+      "Payment Method",
+      "Transaction ID",
+      "Payment Status",
+      "Order Status",
+      "Date",
+    ];
 
-    case "newest":
-    default:
-      return Number(b.id) - Number(a.id);
+    const escapeCSV = (value) => {
+      let text = String(value ?? "");
+
+      if (/^[=+\-@\t\r]/.test(text)) {
+        text = "'" + text;
+      }
+
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+
+    const rows = sortedPayments.map((payment) => [
+      payment.order_number,
+      payment.customer_name,
+      payment.phone,
+      payment.total_amount,
+      payment.payment_method,
+      payment.transaction_id,
+      payment.payment_status,
+      payment.order_status,
+      payment.created_at
+        ? new Date(payment.created_at).toLocaleString()
+        : "",
+    ]);
+
+    const csvContent = [
+      headers.map(escapeCSV).join(","),
+      ...rows.map((row) => row.map(escapeCSV).join(",")),
+    ].join("\n");
+
+    const blob = new Blob(["\uFEFF" + csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `RIVELUNE-${activeTab}-payments-${new Date()
+      .toISOString()
+      .slice(0, 10)}.csv`;
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const summary = analytics?.summary || {};
+  const methods = analytics?.paymentMethods || [];
+  const trend = analytics?.dailyTrend || [];
+
+  const monthlyCurrent = monthlyAnalytics?.currentMonth || {};
+const monthlyPrevious = monthlyAnalytics?.previousMonth || {};
+const monthlyGrowth = monthlyAnalytics?.growth || {};
+
+const getGrowthLabel = (current, previous, growth) => {
+  const currentValue = Number(current || 0);
+  const previousValue = Number(previous || 0);
+
+  if (previousValue === 0 && currentValue > 0) {
+    return "New";
   }
+
+  if (previousValue === 0 && currentValue === 0) {
+    return "0%";
+  }
+
+  const growthValue = Number(growth || 0);
+
+  return `${growthValue > 0 ? "+" : ""}${growthValue.toFixed(1)}%`;
+};
+
+const getGrowthColor = (current, previous) => {
+  const currentValue = Number(current || 0);
+  const previousValue = Number(previous || 0);
+
+  if (currentValue > previousValue) return "positive";
+  if (currentValue < previousValue) return "negative";
+  return "neutral";
+};
+
+const getBestPerformingMetric = () => {
+  const metrics = [
+    {
+      key: "orders",
+      value: Number(monthlyGrowth.orders || 0),
+      current: Number(monthlyCurrent.orders || 0),
+      previous: Number(monthlyPrevious.orders || 0),
+    },
+    {
+      key: "orderValue",
+      value: Number(monthlyGrowth.orderValue || 0),
+      current: Number(monthlyCurrent.orderValue || 0),
+      previous: Number(monthlyPrevious.orderValue || 0),
+    },
+    {
+      key: "verifiedWalletRevenue",
+      value: Number(monthlyGrowth.verifiedWalletRevenue || 0),
+      current: Number(monthlyCurrent.verifiedWalletRevenue || 0),
+      previous: Number(monthlyPrevious.verifiedWalletRevenue || 0),
+    },
+  ];
+
+  const eligibleMetrics = metrics.filter(
+    (metric) => metric.current > metric.previous
+  );
+
+  if (eligibleMetrics.length === 0) return null;
+
+  return eligibleMetrics.reduce((best, metric) =>
+    metric.value > best.value ? metric : best
+  );
+};
+
+const bestPerformingMetric = getBestPerformingMetric();
+const getGrowthIcon = (current, previous) => {
+  const currentValue = Number(current || 0);
+  const previousValue = Number(previous || 0);
+
+  if (currentValue > previousValue) return ArrowUpRight;
+  if (currentValue < previousValue) return ArrowDownRight;
+
+  return null;
+};
+const currentMonthName = new Date().toLocaleString("en", {
+  month: "long",
+  year: "numeric",
 });
+
+const previousMonthName = new Date(
+  new Date().getFullYear(),
+  new Date().getMonth() - 1,
+  1
+).toLocaleString("en", {
+  month: "long",
+  year: "numeric",
+});
+
+  const totalMethodOrders = methods.reduce(
+    (total, item) => total + Number(item.total_orders || 0),
+    0
+  );
+
+  const paymentMethodName = (method) => {
+    const names = {
+      cod: "Cash on Delivery",
+      easypaisa: "Easypaisa",
+      jazzcash: "JazzCash",
+    };
+
+    return names[method] || method?.toUpperCase() || "Unknown";
+  };
+
+  const methodColor = (method) => {
+    const colors = {
+      cod: "#9c7a48",
+      easypaisa: "#4a8b64",
+      jazzcash: "#7c68b1",
+    };
+
+    return colors[method] || "#a18c76";
+  };
 
   return (
     <main className="admin-payments-page">
@@ -412,13 +881,9 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
         {/* Header */}
         <header className="admin-payments-header">
           <div>
-            <span className="admin-eyebrow">
-              RIVELUNE ADMINISTRATION
-            </span>
+            <span className="admin-eyebrow">RIVELUNE ADMINISTRATION</span>
             <h1>Payment Review</h1>
-            <p>
-              Review customer wallet payments and manage verification.
-            </p>
+            <p>Review customer wallet payments and manage verification.</p>
           </div>
 
           <div
@@ -458,7 +923,463 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
           </div>
         </header>
 
-        {/* Payment Statistics */}
+        {/* ================= ANALYTICS DASHBOARD ================= */}
+        <section className="admin-payment-analytics">
+          <div className="admin-analytics-header">
+            <div>
+              <span className="admin-eyebrow">PAYMENT OVERVIEW</span>
+              <h2>Analytics Dashboard</h2>
+              <p>Monitor orders, payment activity and revenue trends.</p>
+            </div>
+
+            <button
+              type="button"
+              className="admin-analytics-refresh-btn"
+              onClick={() => setAnalyticsRefresh((prev) => prev + 1)}
+              disabled={analyticsLoading}
+            >
+              <RefreshCw
+                size={16}
+                className={analyticsLoading ? "analytics-spin" : ""}
+              />
+              {analyticsLoading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+
+          {analyticsError && (
+            <div className="admin-analytics-error">
+              <XCircle size={17} />
+              <span>{analyticsError}</span>
+              <button
+                type="button"
+                onClick={() => setAnalyticsRefresh((prev) => prev + 1)}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* Analytics Cards */}
+          <div className="admin-analytics-cards">
+            <article className="admin-analytics-card analytics-card-orders">
+              <div className="admin-analytics-card-top">
+                <span className="admin-analytics-icon">
+                  <ShoppingBag size={20} />
+                </span>
+                <span className="admin-analytics-label">Total Orders</span>
+              </div>
+
+              <strong className="admin-analytics-value">
+                {analyticsLoading
+                  ? "..."
+                  : Number(summary.total_orders || 0).toLocaleString()}
+              </strong>
+
+              <span className="admin-analytics-footnote">
+                All orders placed
+              </span>
+            </article>
+
+            <article className="admin-analytics-card analytics-card-value">
+              <div className="admin-analytics-card-top">
+                <span className="admin-analytics-icon">
+                  <TrendingUp size={20} />
+                </span>
+                <span className="admin-analytics-label">Total Order Value</span>
+              </div>
+
+              <strong className="admin-analytics-value">
+                {analyticsLoading
+                  ? "..."
+                  : formatPKR(summary.total_order_value)}
+              </strong>
+
+              <span className="admin-analytics-footnote">
+                All order amounts combined
+              </span>
+            </article>
+
+            <article className="admin-analytics-card analytics-card-verified">
+              <div className="admin-analytics-card-top">
+                <span className="admin-analytics-icon">
+                  <Wallet size={20} />
+                </span>
+                <span className="admin-analytics-label">Verified Wallet</span>
+              </div>
+
+              <strong className="admin-analytics-value">
+                {analyticsLoading
+                  ? "..."
+                  : formatPKR(summary.verified_wallet_revenue)}
+              </strong>
+
+              <span className="admin-analytics-footnote">
+                Confirmed wallet payments
+              </span>
+            </article>
+
+            <article className="admin-analytics-card analytics-card-pending">
+              <div className="admin-analytics-card-top">
+                <span className="admin-analytics-icon">
+                  <Clock size={20} />
+                </span>
+                <span className="admin-analytics-label">Pending Reviews</span>
+              </div>
+
+              <strong className="admin-analytics-value">
+                {analyticsLoading
+                  ? "..."
+                  : Number(summary.pending_payments || 0).toLocaleString()}
+              </strong>
+
+              <span className="admin-analytics-footnote">
+                Awaiting payment verification
+              </span>
+            </article>
+          </div>
+
+{/* Monthly Insights */}
+<section className="monthly-insights-section">
+  <div className="monthly-insights-header">
+    <div>
+      <h2>Monthly Insights</h2>
+      <p>Compare this month with the previous month</p>
+    </div>
+
+    <div className="monthly-insights-period">
+      <span>{currentMonthName}</span>
+      <span className="monthly-period-arrow">→</span>
+      <span>{previousMonthName}</span>
+    </div>
+  </div>
+
+  {monthlyLoading ? (
+    <div className="monthly-insights-loading">
+      <RefreshCw size={20} className="analytics-spin" />
+      <span>Loading monthly insights...</span>
+    </div>
+  ) : monthlyError ? (
+    <div className="monthly-insights-error">
+      {monthlyError}
+    </div>
+  ) : monthlyAnalytics ? (
+    <div className="monthly-insights-grid">
+
+      {/* Monthly Orders */}
+      <div
+        className={`monthly-insight-card ${
+          bestPerformingMetric?.key === "orders"
+            ? "best-performing"
+            : ""
+        }`}
+      >
+        <div className="monthly-insight-top">
+          <div className="monthly-insight-icon orders">
+            <ShoppingBag size={20} />
+          </div>
+
+          <span
+            className={`monthly-growth-badge ${getGrowthColor(
+              monthlyCurrent.orders,
+              monthlyPrevious.orders
+            )}`}
+          >
+            {(() => {
+              const GrowthIcon = getGrowthIcon(
+                monthlyCurrent.orders,
+                monthlyPrevious.orders
+              );
+
+              return (
+                <>
+                  {GrowthIcon && <GrowthIcon size={14} />}
+                  {getGrowthLabel(
+                    monthlyCurrent.orders,
+                    monthlyPrevious.orders,
+                    monthlyGrowth.orders
+                  )}
+                </>
+              );
+            })()}
+          </span>
+        </div>
+
+        {bestPerformingMetric?.key === "orders" && (
+          <div className="best-performance-label">
+            <TrendingUp size={13} />
+            Best Performance
+          </div>
+        )}
+
+        <h3>Monthly Orders</h3>
+
+        <div className="monthly-comparison-values">
+          <div>
+            <strong>{monthlyCurrent.orders ?? 0}</strong>
+            <span>This Month</span>
+          </div>
+
+          <div className="monthly-comparison-divider">vs</div>
+
+          <div>
+            <strong>{monthlyPrevious.orders ?? 0}</strong>
+            <span>Last Month</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Order Value */}
+      <div
+        className={`monthly-insight-card ${
+          bestPerformingMetric?.key === "orderValue"
+            ? "best-performing"
+            : ""
+        }`}
+      >
+        <div className="monthly-insight-top">
+          <div className="monthly-insight-icon value">
+            <TrendingUp size={20} />
+          </div>
+
+          <span
+            className={`monthly-growth-badge ${getGrowthColor(
+              monthlyCurrent.orderValue,
+              monthlyPrevious.orderValue
+            )}`}
+          >
+            {(() => {
+              const GrowthIcon = getGrowthIcon(
+                monthlyCurrent.orderValue,
+                monthlyPrevious.orderValue
+              );
+
+              return (
+                <>
+                  {GrowthIcon && <GrowthIcon size={14} />}
+                  {getGrowthLabel(
+                    monthlyCurrent.orderValue,
+                    monthlyPrevious.orderValue,
+                    monthlyGrowth.orderValue
+                  )}
+                </>
+              );
+            })()}
+          </span>
+        </div>
+
+        {bestPerformingMetric?.key === "orderValue" && (
+          <div className="best-performance-label">
+            <TrendingUp size={13} />
+            Best Performance
+          </div>
+        )}
+
+        <h3>Order Value</h3>
+
+        <div className="monthly-comparison-values">
+          <div>
+            <strong>{formatPKR(monthlyCurrent.orderValue)}</strong>
+            <span>This Month</span>
+          </div>
+
+          <div className="monthly-comparison-divider">vs</div>
+
+          <div>
+            <strong>{formatPKR(monthlyPrevious.orderValue)}</strong>
+            <span>Last Month</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Verified Wallet Revenue */}
+      <div
+        className={`monthly-insight-card ${
+          bestPerformingMetric?.key === "verifiedWalletRevenue"
+            ? "best-performing"
+            : ""
+        }`}
+      >
+        <div className="monthly-insight-top">
+          <div className="monthly-insight-icon wallet">
+            <Wallet size={20} />
+          </div>
+
+          <span
+            className={`monthly-growth-badge ${getGrowthColor(
+              monthlyCurrent.verifiedWalletRevenue,
+              monthlyPrevious.verifiedWalletRevenue
+            )}`}
+          >
+            {(() => {
+              const GrowthIcon = getGrowthIcon(
+                monthlyCurrent.verifiedWalletRevenue,
+                monthlyPrevious.verifiedWalletRevenue
+              );
+
+              return (
+                <>
+                  {GrowthIcon && <GrowthIcon size={14} />}
+                  {getGrowthLabel(
+                    monthlyCurrent.verifiedWalletRevenue,
+                    monthlyPrevious.verifiedWalletRevenue,
+                    monthlyGrowth.verifiedWalletRevenue
+                  )}
+                </>
+              );
+            })()}
+          </span>
+        </div>
+
+        {bestPerformingMetric?.key === "verifiedWalletRevenue" && (
+          <div className="best-performance-label">
+            <TrendingUp size={13} />
+            Best Performance
+          </div>
+        )}
+
+        <h3>Verified Wallet Revenue</h3>
+
+        <div className="monthly-comparison-values">
+          <div>
+            <strong>
+              {formatPKR(monthlyCurrent.verifiedWalletRevenue)}
+            </strong>
+            <span>This Month</span>
+          </div>
+
+          <div className="monthly-comparison-divider">vs</div>
+
+          <div>
+            <strong>
+              {formatPKR(monthlyPrevious.verifiedWalletRevenue)}
+            </strong>
+            <span>Last Month</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  ) : (
+    <div className="monthly-insights-empty">
+      Monthly comparison data is not available.
+    </div>
+  )}
+</section>
+
+          {/* Wallet Payment Status */}
+          <div className="admin-analytics-status-row">
+            <div className="admin-analytics-status-item">
+              <span className="analytics-status-indicator status-pending" />
+              <span>Pending Wallet</span>
+              <strong>
+                {analyticsLoading ? "..." : summary.pending_payments || 0}
+              </strong>
+            </div>
+
+            <div className="admin-analytics-status-item">
+              <span className="analytics-status-indicator status-verified" />
+              <span>Verified Wallet</span>
+              <strong>
+                {analyticsLoading ? "..." : summary.verified_payments || 0}
+              </strong>
+            </div>
+
+            <div className="admin-analytics-status-item">
+              <span className="analytics-status-indicator status-rejected" />
+              <span>Rejected Wallet</span>
+              <strong>
+                {analyticsLoading ? "..." : summary.rejected_payments || 0}
+              </strong>
+            </div>
+          </div>
+
+          {/* Chart + Payment Methods */}
+          <div className="admin-analytics-content-grid">
+            <section className="admin-analytics-box admin-analytics-trend">
+              <div className="admin-analytics-box-heading">
+                <div>
+                  <h3>7-Day Order Trend</h3>
+                  <p>Daily order value based on order date</p>
+                </div>
+                <TrendingUp size={19} />
+              </div>
+
+              {analyticsLoading ? (
+                <div className="analytics-chart-empty">
+                  Loading chart data...
+                </div>
+              ) : (
+                <RevenueTrendChart data={trend} />
+              )}
+            </section>
+
+            <section className="admin-analytics-box admin-analytics-methods">
+              <div className="admin-analytics-box-heading">
+                <div>
+                  <h3>Payment Methods</h3>
+                  <p>Order distribution by payment type</p>
+                </div>
+                <CreditCard size={19} />
+              </div>
+
+              {analyticsLoading ? (
+                <div className="analytics-chart-empty">
+                  Loading payment methods...
+                </div>
+              ) : methods.length === 0 ? (
+                <div className="analytics-chart-empty">
+                  No payment method data available.
+                </div>
+              ) : (
+                <div className="analytics-method-list">
+                  {methods.map((method) => {
+                    const count = Number(method.total_orders || 0);
+                    const percentage = totalMethodOrders
+                      ? (count / totalMethodOrders) * 100
+                      : 0;
+
+                    return (
+                      <div
+                        className="analytics-method-item"
+                        key={method.payment_method}
+                      >
+                        <div className="analytics-method-top">
+                          <span className="analytics-method-name">
+                            <span
+                              className="analytics-method-dot"
+                              style={{
+                                background: methodColor(method.payment_method),
+                              }}
+                            />
+                            {paymentMethodName(method.payment_method)}
+                          </span>
+                          <strong>{count} orders</strong>
+                        </div>
+
+                        <div className="analytics-method-track">
+                          <div
+                            className="analytics-method-progress"
+                            style={{
+                              width: `${percentage}%`,
+                              background: methodColor(method.payment_method),
+                            }}
+                          />
+                        </div>
+
+                        <div className="analytics-method-bottom">
+                          <span>{percentage.toFixed(1)}% of orders</span>
+                          <span>{formatPKR(method.total_amount)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        </section>
+
+        {/* Existing Payment Statistics */}
         <div className="admin-payment-stats">
           <div className="admin-payment-stat">
             <Clock size={20} />
@@ -481,11 +1402,11 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
 
         {/* Payment Panel */}
         <section className="admin-payment-panel">
-          {/* Tabs */}
           <div className="admin-payment-tabs">
             <button
               className={activeTab === "pending" ? "active" : ""}
               onClick={() => setActiveTab("pending")}
+              type="button"
             >
               <Clock size={16} />
               Pending ({pendingCount})
@@ -494,6 +1415,7 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
             <button
               className={activeTab === "verified" ? "active" : ""}
               onClick={() => setActiveTab("verified")}
+              type="button"
             >
               <CheckCircle size={16} />
               Verified ({verifiedCount})
@@ -502,6 +1424,7 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
             <button
               className={activeTab === "rejected" ? "active" : ""}
               onClick={() => setActiveTab("rejected")}
+              type="button"
             >
               <XCircle size={16} />
               Rejected ({rejectedCount})
@@ -510,90 +1433,96 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
 
           {/* Payment List */}
           <div className="admin-payment-list">
+            <div className="admin-payment-search">
+              <div className="admin-payment-search-input">
+                <Eye size={18} />
 
+                <input
+                  type="text"
+                  placeholder="Search order, customer, phone or transaction ID..."
+                  value={paymentSearch}
+                  onChange={(e) => setPaymentSearch(e.target.value)}
+                />
 
-{/* Payment Search Bar */}
-<div className="admin-payment-search">
-  <div className="admin-payment-search-input">
-    <Eye size={18} />
-    <input
-      type="text"
-      placeholder="Search order, customer, phone or transaction ID..."
-      value={paymentSearch}
-      onChange={(e) => setPaymentSearch(e.target.value)}
-    />
+                {paymentSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentSearch("")}
+                    aria-label="Clear search"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
 
-    {paymentSearch && (
-      <button
-        type="button"
-        onClick={() => setPaymentSearch("")}
-        aria-label="Clear search"
-      >
-        <X size={16} />
-      </button>
-    )}
-  </div>
+              <span className="admin-payment-search-count">
+                {filteredPayments.length} result
+                {filteredPayments.length !== 1 ? "s" : ""}
+              </span>
 
-  <span className="admin-payment-search-count">
-    {filteredPayments.length} result
-    {filteredPayments.length !== 1 ? "s" : ""}
-  </span>
-</div>
-{/* Payment Sorting */}
-<div className="admin-payment-sort">
-  <label htmlFor="payment-sort">Sort by</label>
+              <div className="admin-payment-sort">
+                <label htmlFor="payment-sort">Sort by</label>
+                <select
+                  id="payment-sort"
+                  value={paymentSort}
+                  onChange={(e) => setPaymentSort(e.target.value)}
+                >
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                  <option value="highest">Highest Amount</option>
+                  <option value="lowest">Lowest Amount</option>
+                </select>
+              </div>
 
-  <select
-    id="payment-sort"
-    value={paymentSort}
-    onChange={(e) => setPaymentSort(e.target.value)}
-  >
-    <option value="newest">Newest First</option>
-    <option value="oldest">Oldest First</option>
-    <option value="highest">Highest Amount</option>
-    <option value="lowest">Lowest Amount</option>
-  </select>
-</div>
+              <button
+                type="button"
+                className="admin-payment-export-btn"
+                onClick={handleExportPayments}
+                disabled={sortedPayments.length === 0}
+              >
+                <Download size={16} />
+                Export CSV
+              </button>
 
-{/* Payment Date Filters */}
-<div className="admin-payment-date-filters">
-  <div className="admin-payment-date-field">
-    <label htmlFor="payment-start-date">From</label>
-    <input
-      id="payment-start-date"
-      type="date"
-      value={startDate}
-      max={endDate || undefined}
-      onChange={(e) => setStartDate(e.target.value)}
-    />
-  </div>
+              <div className="admin-payment-date-filters">
+                <div className="admin-payment-date-field">
+                  <label htmlFor="payment-start-date">From</label>
+                  <input
+                    id="payment-start-date"
+                    type="date"
+                    value={startDate}
+                    max={endDate || undefined}
+                    onChange={(e) => setStartDate(e.target.value)}
+                  />
+                </div>
 
-  <div className="admin-payment-date-field">
-    <label htmlFor="payment-end-date">To</label>
-    <input
-      id="payment-end-date"
-      type="date"
-      value={endDate}
-      min={startDate || undefined}
-      onChange={(e) => setEndDate(e.target.value)}
-    />
-  </div>
+                <div className="admin-payment-date-field">
+                  <label htmlFor="payment-end-date">To</label>
+                  <input
+                    id="payment-end-date"
+                    type="date"
+                    value={endDate}
+                    min={startDate || undefined}
+                    onChange={(e) => setEndDate(e.target.value)}
+                  />
+                </div>
 
-  {(startDate || endDate) && (
-  <button
-    type="button"
-    className="admin-payment-clear-date-btn"
-    onClick={() => {
-      setStartDate("");
-      setEndDate("");
-    }}
-  >
-    <X size={15} />
-    Clear Dates
-  </button>
-)}
-</div>
-            {/* Action Error */}
+                {(startDate || endDate) && (
+                  <button
+                    type="button"
+                    className="admin-payment-clear-date-btn"
+                    onClick={() => {
+                      setStartDate("");
+                      setEndDate("");
+                    }}
+                  >
+                    <X size={15} />
+                    Clear Dates
+                  </button>
+                )}
+              </div>
+            </div>
+
             {actionError && !rejectPayment && (
               <div
                 style={{
@@ -609,7 +1538,6 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
               </div>
             )}
 
-            {/* Action Success */}
             {actionSuccess && (
               <div
                 style={{
@@ -627,7 +1555,6 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
               </div>
             )}
 
-            {/* Loading */}
             {loading ? (
               <div className="admin-payment-empty">
                 <Clock size={34} />
@@ -635,155 +1562,153 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
                 <p>Please wait while payment records are fetched.</p>
               </div>
             ) : error ? (
-              /* Fetch Error */
               <div className="admin-payment-empty">
                 <XCircle size={34} />
                 <h3>Unable to load payments</h3>
                 <p>{error}</p>
               </div>
-         ) : filteredPayments.length === 0 ? (
-              /* Empty State */
-             
-<div className="admin-payment-empty">
-  {paymentSearch.trim() ? (
-    <>
-      <div className="admin-payment-empty-icon">
-        <Eye size={28} />
-      </div>
-
-      <h3>No Search Results</h3>
-
-      <p>
-        No payments found matching
-        {" "}
-        <strong>"{paymentSearch}"</strong>
-      </p>
-
-      <button
-        type="button"
-        className="admin-payment-clear-search"
-        onClick={() => setPaymentSearch("")}
-      >
-        <X size={16} />
-        Clear Search
-      </button>
-    </>
-  ) : (
-    <>
-      <div className="admin-payment-empty-icon">
-        <CreditCard size={28} />
-      </div>
-
-      <h3>
-        {activeTab === "pending" && "Pending Payments"}
-        {activeTab === "verified" && "Verified Payments"}
-        {activeTab === "rejected" && "Rejected Payments"}
-      </h3>
-
-      <p>No payment records found in this category.</p>
-    </>
-  )}
-</div>
-
+            ) : filteredPayments.length === 0 ? (
+              <div className="admin-payment-empty">
+                {paymentSearch.trim() || startDate || endDate ? (
+                  <>
+                    <div className="admin-payment-empty-icon">
+                      <Eye size={28} />
+                    </div>
+                    <h3>No Matching Payments</h3>
+                    <p>
+                      No payments found with the current search or date filters.
+                    </p>
+                    <button
+                      type="button"
+                      className="admin-payment-clear-search"
+                      onClick={() => {
+                        setPaymentSearch("");
+                        setStartDate("");
+                        setEndDate("");
+                      }}
+                    >
+                      <X size={16} />
+                      Clear Filters
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="admin-payment-empty-icon">
+                      <CreditCard size={28} />
+                    </div>
+                    <h3>
+                      {activeTab === "pending" && "Pending Payments"}
+                      {activeTab === "verified" && "Verified Payments"}
+                      {activeTab === "rejected" && "Rejected Payments"}
+                    </h3>
+                    <p>No payment records found in this category.</p>
+                  </>
+                )}
+              </div>
             ) : (
-            
-<div className="admin-payment-cards">
-{sortedPayments.map((payment) => (
-    <article key={payment.id} className="admin-payment-card">
-      {/* Order Header */}
-      <div className="admin-payment-card-header">
-        <div>
-          <span className="admin-payment-order-label">ORDER</span>
-          <strong>#{payment.order_number}</strong>
-        </div>
+              <div className="admin-payment-cards">
+                {sortedPayments.map((payment) => (
+                  <article
+                    key={payment.id}
+                    className="admin-payment-card"
+                  >
+                    <div className="admin-payment-card-header">
+                      <div>
+                        <span className="admin-payment-order-label">
+                          ORDER
+                        </span>
+                        <strong>#{payment.order_number}</strong>
+                      </div>
 
-        <div className="admin-payment-amount">
-          PKR {Number(payment.total_amount || 0).toLocaleString()}
-        </div>
-      </div>
+                      <div className="admin-payment-amount">
+                        PKR{" "}
+                        {Number(payment.total_amount || 0).toLocaleString()}
+                      </div>
+                    </div>
 
-      {/* Customer Details */}
-      <div className="admin-payment-card-details">
-        <p>
-          <strong>Customer</strong>
-          <span>{payment.customer_name}</span>
-        </p>
+                    <div className="admin-payment-card-details">
+                      <p>
+                        <strong>Customer</strong>
+                        <span>{payment.customer_name}</span>
+                      </p>
 
-        <p>
-          <strong>Phone</strong>
-          <span>{payment.phone}</span>
-        </p>
+                      <p>
+                        <strong>Phone</strong>
+                        <span>{payment.phone}</span>
+                      </p>
 
-        <p>
-          <strong>Payment Method</strong>
-          <span>{payment.payment_method?.toUpperCase()}</span>
-        </p>
+                      <p>
+                        <strong>Payment Method</strong>
+                        <span>{payment.payment_method?.toUpperCase()}</span>
+                      </p>
 
-        <p>
-          <strong>Transaction ID</strong>
-          <span>{payment.transaction_id || "Not provided"}</span>
-        </p>
+                      <p>
+                        <strong>Transaction ID</strong>
+                        <span>{payment.transaction_id || "Not provided"}</span>
+                      </p>
 
-        <p>
-          <strong>Payment Status</strong>
-          <span>{payment.payment_status}</span>
-        </p>
+                      <p>
+                        <strong>Payment Status</strong>
+                        <span>{payment.payment_status}</span>
+                      </p>
 
-        {payment.payment_review_notes && (
-          <p className="admin-payment-review-notes">
-            <strong>Review Notes</strong>
-            <span>{payment.payment_review_notes}</span>
-          </p>
-        )}
+                      {payment.payment_review_notes && (
+                        <p className="admin-payment-review-notes">
+                          <strong>Review Notes</strong>
+                          <span>{payment.payment_review_notes}</span>
+                        </p>
+                      )}
 
-        <p>
-          <strong>Order Status</strong>
-          <span>{payment.order_status}</span>
-        </p>
-      </div>
+                      <p>
+                        <strong>Order Status</strong>
+                        <span>{payment.order_status}</span>
+                      </p>
 
-      {/* View Payment Proof */}
-      {payment.payment_proof && (
-        <button
-          type="button"
-          className="admin-payment-proof-btn"
-          onClick={() => handleViewProof(payment)}
-        >
-          <Eye size={16} />
-          View Payment Proof
-        </button>
-      )}
+                      <p>
+                        <strong>Date</strong>
+                        <span>{formatDate(payment.created_at)}</span>
+                      </p>
+                    </div>
 
-      {/* Verify & Reject Actions */}
-      {activeTab === "pending" && (
-        <div className="admin-payment-card-actions">
-          <button
-            type="button"
-            className="admin-payment-verify-btn"
-            onClick={() => handleVerifyPayment(payment)}
-            disabled={actionLoading === payment.id}
-          >
-            <CheckCircle size={16} />
-            {actionLoading === payment.id
-              ? "Processing..."
-              : "Verify Payment"}
-          </button>
+                    {payment.payment_proof && (
+                      <button
+                        type="button"
+                        className="admin-payment-proof-btn"
+                        onClick={() => handleViewProof(payment)}
+                      >
+                        <Eye size={16} />
+                        View Payment Proof
+                      </button>
+                    )}
 
-          <button
-            type="button"
-            className="admin-payment-reject-btn"
-            onClick={() => handleRejectPayment(payment)}
-            disabled={actionLoading === payment.id}
-          >
-            <XCircle size={16} />
-            Reject Payment
-          </button>
-        </div>
-      )}
-    </article>
-  ))}
-</div>
+                    {activeTab === "pending" && (
+                      <div className="admin-payment-card-actions">
+                        <button
+                          type="button"
+                          className="admin-payment-verify-btn"
+                          onClick={() => handleVerifyPayment(payment)}
+                          disabled={actionLoading === payment.id}
+                        >
+                          <CheckCircle size={16} />
+                          {actionLoading === payment.id
+                            ? "Processing..."
+                            : "Verify Payment"}
+                        </button>
 
+                        <button
+                          type="button"
+                          className="admin-payment-reject-btn"
+                          onClick={() => handleRejectPayment(payment)}
+                          disabled={actionLoading === payment.id}
+                        >
+                          <XCircle size={16} />
+                          Reject Payment
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
             )}
           </div>
         </section>
@@ -817,7 +1742,6 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
               boxShadow: "0 20px 70px rgba(0,0,0,0.3)",
             }}
           >
-            {/* Proof Modal Header */}
             <div
               style={{
                 display: "flex",
@@ -856,34 +1780,20 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
               </button>
             </div>
 
-            {/* Proof Loading */}
             {proofLoading && (
-              <div
-                style={{
-                  padding: "45px 20px",
-                  textAlign: "center",
-                }}
-              >
+              <div style={{ padding: "45px 20px", textAlign: "center" }}>
                 <Clock size={32} />
                 <p>Loading payment proof...</p>
               </div>
             )}
 
-            {/* Proof Error */}
             {proofError && (
-              <div
-                style={{
-                  padding: "25px",
-                  textAlign: "center",
-                  color: "#a52e25",
-                }}
-              >
+              <div style={{ padding: "25px", textAlign: "center", color: "#a52e25" }}>
                 <XCircle size={32} />
                 <p>{proofError}</p>
               </div>
             )}
 
-            {/* Proof Image */}
             {proofUrl && (
               <div style={{ textAlign: "center" }}>
                 <img
@@ -909,11 +1819,8 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
                     fontSize: "12px",
                   }}
                 >
-                  <Image
-                    size={14}
-                    style={{ verticalAlign: "middle" }}
-                  />{" "}
-                  Securely loaded payment image
+                  <Image size={14} style={{ verticalAlign: "middle" }} /> Securely
+                  loaded payment image
                 </p>
               </div>
             )}
@@ -948,7 +1855,6 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal Header */}
             <div
               style={{
                 display: "flex",
@@ -957,13 +1863,7 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
                 marginBottom: "20px",
               }}
             >
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: "22px",
-                  color: "#252525",
-                }}
-              >
+              <h2 style={{ margin: 0, fontSize: "22px", color: "#252525" }}>
                 Reject Payment
               </h2>
 
@@ -978,31 +1878,19 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
                   borderRadius: "50%",
                   width: "36px",
                   height: "36px",
-                  cursor:
-                    actionLoading === rejectPayment.id
-                      ? "not-allowed"
-                      : "pointer",
+                  cursor: actionLoading === rejectPayment.id ? "not-allowed" : "pointer",
                   fontSize: "20px",
-                  opacity:
-                    actionLoading === rejectPayment.id ? 0.5 : 1,
+                  opacity: actionLoading === rejectPayment.id ? 0.5 : 1,
                 }}
               >
                 ×
               </button>
             </div>
 
-            {/* Order Information */}
-            <p
-              style={{
-                color: "#666",
-                fontSize: "14px",
-                marginBottom: "18px",
-              }}
-            >
+            <p style={{ color: "#666", fontSize: "14px", marginBottom: "18px" }}>
               Order #{rejectPayment.order_number}
             </p>
 
-            {/* Rejection Reason Label */}
             <label
               htmlFor="payment-rejection-reason"
               style={{
@@ -1016,7 +1904,6 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
               Rejection Reason
             </label>
 
-            {/* Rejection Reason Textarea */}
             <textarea
               id="payment-rejection-reason"
               value={rejectionReason}
@@ -1037,12 +1924,10 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
                 fontSize: "14px",
                 fontFamily: "inherit",
                 boxSizing: "border-box",
-                opacity:
-                  actionLoading === rejectPayment.id ? 0.7 : 1,
+                opacity: actionLoading === rejectPayment.id ? 0.7 : 1,
               }}
             />
 
-            {/* Modal Error Message */}
             {actionError && (
               <div
                 style={{
@@ -1059,7 +1944,6 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
               </div>
             )}
 
-            {/* Modal Actions */}
             <div
               style={{
                 display: "flex",
@@ -1069,7 +1953,6 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
                 flexWrap: "wrap",
               }}
             >
-              {/* Cancel */}
               <button
                 type="button"
                 onClick={closeRejectModal}
@@ -1080,43 +1963,32 @@ const sortedPayments = [...filteredPayments].sort((a, b) => {
                   borderRadius: "9px",
                   background: "#fff",
                   color: "#444",
-                  cursor:
-                    actionLoading === rejectPayment.id
-                      ? "not-allowed"
-                      : "pointer",
-                  opacity:
-                    actionLoading === rejectPayment.id ? 0.6 : 1,
+                  cursor: actionLoading === rejectPayment.id ? "not-allowed" : "pointer",
+                  opacity: actionLoading === rejectPayment.id ? 0.6 : 1,
                 }}
               >
                 Cancel
               </button>
 
-              {/* Confirm Rejection - Connected */}
               <button
                 type="button"
                 onClick={submitRejectPayment}
-                disabled={
-                  !rejectionReason.trim() ||
-                  actionLoading === rejectPayment.id
-                }
+                disabled={!rejectionReason.trim() || actionLoading === rejectPayment.id}
                 style={{
                   padding: "11px 20px",
                   border: "none",
                   borderRadius: "9px",
                   background:
-                    rejectionReason.trim() &&
-                    actionLoading !== rejectPayment.id
+                    rejectionReason.trim() && actionLoading !== rejectPayment.id
                       ? "#b83232"
                       : "#ccc",
                   color: "#fff",
                   cursor:
-                    rejectionReason.trim() &&
-                    actionLoading !== rejectPayment.id
+                    rejectionReason.trim() && actionLoading !== rejectPayment.id
                       ? "pointer"
                       : "not-allowed",
                   fontWeight: "600",
-                  opacity:
-                    actionLoading === rejectPayment.id ? 0.7 : 1,
+                  opacity: actionLoading === rejectPayment.id ? 0.7 : 1,
                 }}
               >
                 {actionLoading === rejectPayment.id

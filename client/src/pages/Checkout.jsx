@@ -20,7 +20,15 @@ const formatPrice = (price) =>
   `PKR ${Number(price || 0).toLocaleString("en-PK")}`;
 
 export default function Checkout() {
-  const { cartItems, cartTotal, cartCount, clearCart } = useCart();
+const {
+  cartItems,
+  cartTotal,
+  cartCount,
+  clearCart,
+  appliedCoupon,
+  discountAmount,
+  discountedTotal,
+} = useCart();
 
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [loading, setLoading] = useState(false);
@@ -38,10 +46,12 @@ export default function Checkout() {
     order_notes: "",
   });
 
-  const shippingFee =
-    cartTotal >= 10000 ? 0 : cartItems.length > 0 ? 500 : 0;
+ // SHIPPING
+const shippingFee =
+  cartTotal >= 10000 ? 0 : cartItems.length > 0 ? 500 : 0;
 
-  const grandTotal = cartTotal + shippingFee;
+// FINAL TOTAL AFTER COUPON
+const grandTotal = discountedTotal + shippingFee;
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -64,19 +74,30 @@ export default function Checkout() {
 
     setLoading(true);
 
-    const payload = {
-      customer,
-      payment_method: paymentMethod,
-      items: cartItems.map((item) => ({
-        product_id: item.id,
-        product_name: item.name,
-        product_image: item.image,
-        size: item.size,
-        color: item.color,
-        quantity: item.quantity,
-        unit_price: item.price,
-      })),
-    };
+  const payload = {
+  customer,
+  payment_method: paymentMethod,
+
+  // PRICE DETAILS
+  subtotal_amount: cartTotal,
+  coupon_code: appliedCoupon?.code || null,
+  discount_amount: discountAmount,
+  shipping_fee: shippingFee,
+  total_amount: grandTotal,
+
+  items: cartItems.map((item) => ({
+    product_id: item.id,
+    product_name: item.name,
+    product_image: item.image,
+    size: item.size,
+    color: item.color,
+    quantity: item.quantity,
+    unit_price: item.price,
+  })),
+};
+
+console.log("ORDER PAYLOAD:", payload);
+console.table(payload.items);
 console.log("ORDER PAYLOAD:", payload);
 console.table(payload.items);
     try {
@@ -614,89 +635,122 @@ console.table(payload.items);
             </div>
 
             {/* PRICE BREAKDOWN */}
-            <div className="border-t border-[#eeeae3] p-6">
+           {/* PRICE BREAKDOWN */}
+<div className="border-t border-[#eeeae3] p-6">
+  <div className="space-y-4">
 
-              <div className="space-y-4">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">
-                    Items ({cartCount})
-                  </span>
-                  <span className="font-medium">
-                    {formatPrice(cartTotal)}
-                  </span>
-                </div>
+    {/* SUBTOTAL */}
+    <div className="flex justify-between text-sm">
+      <span className="text-gray-500">
+        Items ({cartCount})
+      </span>
+      <span className="font-medium">
+        {formatPrice(cartTotal)}
+      </span>
+    </div>
 
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Shipping</span>
+    {/* APPLIED COUPON */}
+    {appliedCoupon && discountAmount > 0 && (
+      <div className="rounded-lg border border-[#e8e0d3] bg-[#faf8f4] p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-semibold text-[#987b53]">
+              Coupon Applied
+            </p>
+            <p className="mt-1 text-xs font-bold tracking-wider text-[#25231f]">
+              {appliedCoupon.code}
+            </p>
+          </div>
 
-                  <span className="font-medium">
-                    {shippingFee === 0 && cartItems.length > 0
-                      ? "FREE"
-                      : formatPrice(shippingFee)}
-                  </span>
-                </div>
+          <span className="text-sm font-semibold text-green-700">
+            -{formatPrice(discountAmount)}
+          </span>
+        </div>
+      </div>
+    )}
 
-                {cartTotal > 0 && cartTotal < 10000 && (
-                  <div className="rounded-lg bg-[#faf8f4] p-3">
-                    <p className="text-xs leading-5 text-[#987b53]">
-                      Add {formatPrice(10000 - cartTotal)} more for
-                      complimentary shipping.
-                    </p>
-                  </div>
-                )}
+    {/* DISCOUNT */}
+    {discountAmount > 0 && (
+      <div className="flex justify-between text-sm">
+        <span className="text-gray-500">
+          Coupon Discount
+        </span>
+        <span className="font-medium text-green-700">
+          -{formatPrice(discountAmount)}
+        </span>
+      </div>
+    )}
 
-                <div className="border-t border-dashed border-[#e8e4dc] pt-5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-serif text-xl text-[#25231f]">
-                      Total
-                    </span>
+    {/* SHIPPING */}
+    <div className="flex justify-between text-sm">
+      <span className="text-gray-500">Shipping</span>
+      <span className="font-medium">
+        {shippingFee === 0 && cartItems.length > 0
+          ? "FREE"
+          : formatPrice(shippingFee)}
+      </span>
+    </div>
 
-                    <strong className="text-xl text-[#a58b65]">
-                      {formatPrice(grandTotal)}
-                    </strong>
-                  </div>
-                </div>
-              </div>
+    {/* FREE SHIPPING MESSAGE */}
+    {cartTotal > 0 && cartTotal < 10000 && (
+      <div className="rounded-lg bg-[#faf8f4] p-3">
+        <p className="text-xs leading-5 text-[#987b53]">
+          Add {formatPrice(10000 - cartTotal)} more for
+          complimentary shipping.
+        </p>
+      </div>
+    )}
 
-              {/* PLACE ORDER */}
-              <button
-                type="submit"
-                form="checkout-form"
-                disabled={cartItems.length === 0 || loading}
-                className="mt-7 flex w-full items-center justify-center gap-3 rounded-full bg-[#25231f] px-5 py-4 text-xs font-semibold tracking-[0.2em] text-white transition duration-300 hover:bg-[#a58b65] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? (
-                  <>
-                    <LoaderCircle
-                      size={17}
-                      className="animate-spin"
-                    />
-                    PLACING ORDER...
-                  </>
-                ) : (
-                  `PLACE ORDER — ${formatPrice(grandTotal)}`
-                )}
-              </button>
+    {/* FINAL TOTAL */}
+    <div className="border-t border-dashed border-[#e8e4dc] pt-5">
+      <div className="flex items-center justify-between">
+        <span className="font-serif text-xl text-[#25231f]">
+          Total
+        </span>
 
-              {orderMessage && (
-                <p className="mt-4 rounded-lg bg-red-50 p-3 text-xs text-red-600">
-                  {orderMessage}
-                </p>
-              )}
+        <strong className="text-xl text-[#a58b65]">
+          {formatPrice(grandTotal)}
+        </strong>
+      </div>
+    </div>
+  </div>
 
-              <div className="mt-5 flex items-center justify-center gap-2 text-xs text-gray-400">
-                <ShieldCheck size={16} />
-                Secure checkout experience
-              </div>
+  {/* PLACE ORDER */}
+  <button
+    type="submit"
+    form="checkout-form"
+    disabled={cartItems.length === 0 || loading}
+    className="mt-7 flex w-full items-center justify-center gap-3 rounded-full bg-[#25231f] px-5 py-4 text-xs font-semibold tracking-[0.2em] text-white transition duration-300 hover:bg-[#a58b65] disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    {loading ? (
+      <>
+        <LoaderCircle size={17} className="animate-spin" />
+        PLACING ORDER...
+      </>
+    ) : (
+      `PLACE ORDER — ${formatPrice(grandTotal)}`
+    )}
+  </button>
 
-              <Link
-                to="/cart"
-                className="mt-5 flex items-center justify-center gap-2 text-xs font-semibold tracking-wider text-gray-500 transition hover:text-[#a58b65]"
-              >
-                <ArrowLeft size={15} />
-                RETURN TO BAG
-              </Link>
-            </div>
+  {orderMessage && (
+    <p className="mt-4 rounded-lg bg-red-50 p-3 text-xs text-red-600">
+      {orderMessage}
+    </p>
+  )}
+
+  <div className="mt-5 flex items-center justify-center gap-2 text-xs text-gray-400">
+    <ShieldCheck size={16} />
+    Secure checkout experience
+  </div>
+
+  <Link
+    to="/cart"
+    className="mt-5 flex items-center justify-center gap-2 text-xs font-semibold tracking-wider text-gray-500 transition hover:text-[#a58b65]"
+  >
+    <ArrowLeft size={15} />
+    RETURN TO BAG
+  </Link>
+</div>
           </div>
 
           <div className="mt-5 flex items-center justify-center gap-3 rounded-xl border border-[#eeeae3] bg-white p-4 text-xs text-gray-500">

@@ -519,25 +519,38 @@ const getMonthlyPaymentAnalytics = () => {
   });
 };
 // Validate products, variants, prices, and stock using database records
+
 const validateOrderItems = async (items) => {
   const validatedItems = [];
   const requestedStock = {};
 
-  for (const item of items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error("Order items are missing or invalid.");
+  }
+
+  for (const [index, item] of items.entries()) {
+    console.log(`ORDER ITEM ${index + 1} RECEIVED:`, item);
+
     const productId = Number(item.product_id);
     const quantity = Number(item.quantity);
-    const size = String(item.size || "").trim();
-    const color = String(item.color || "").trim();
+    const size = String(item.size ?? "").trim();
+    const color = String(item.color ?? "").trim();
 
-    if (
-      !Number.isInteger(productId) ||
-      productId <= 0 ||
-      !Number.isInteger(quantity) ||
-      quantity < 1 ||
-      !size ||
-      !color
-    ) {
-      throw new Error("Invalid product, variant, or quantity.");
+    // Detailed input validation
+    if (!Number.isInteger(productId) || productId <= 0) {
+      throw new Error(`Item ${index + 1}: Invalid product ID (${item.product_id}).`);
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      throw new Error(`Item ${index + 1}: Invalid quantity (${item.quantity}).`);
+    }
+
+    if (!size) {
+      throw new Error(`Item ${index + 1}: Product size is missing.`);
+    }
+
+    if (!color) {
+      throw new Error(`Item ${index + 1}: Product color is missing.`);
     }
 
     const query = `
@@ -547,46 +560,40 @@ const validateOrderItems = async (items) => {
         p.price AS product_price,
         p.sale_price,
         p.is_active AS product_active,
-
         v.id AS variant_id,
         v.size,
         v.color,
         v.price_override,
         v.stock_quantity,
         v.is_active AS variant_active
-
       FROM products p
-
       LEFT JOIN product_variants v
         ON v.product_id = p.id
-        AND v.size = ?
-        AND v.color = ?
-
+        AND TRIM(v.size) = ?
+        AND TRIM(v.color) = ?
       WHERE p.id = ?
       LIMIT 1
     `;
 
-    const [product] = await new Promise((resolve, reject) => {
-      db.query(query, [size, color, productId], (err, results) => {
+    const results = await new Promise((resolve, reject) => {
+      db.query(query, [size, color, productId], (err, rows) => {
         if (err) return reject(err);
-        resolve(results);
+        resolve(rows);
       });
     });
 
+    const product = results[0];
+
     if (!product || Number(product.product_active) !== 1) {
-      throw new Error("A product in your cart is unavailable.");
+      throw new Error(`Product ID ${productId} is unavailable.`);
     }
 
-    if (
-      !product.variant_id ||
-      Number(product.variant_active) !== 1
-    ) {
+    if (!product.variant_id || Number(product.variant_active) !== 1) {
       throw new Error(
-        `${product.product_name}: selected size or color is unavailable.`
+        `${product.product_name}: Variant not found for size "${size}" and color "${color}".`
       );
     }
 
-    // Determine the actual price from the database
     const unitPrice =
       product.price_override !== null
         ? Number(product.price_override)
@@ -595,10 +602,9 @@ const validateOrderItems = async (items) => {
         : Number(product.product_price);
 
     if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
-      throw new Error("Invalid product price.");
+      throw new Error(`${product.product_name}: Invalid database price.`);
     }
 
-    // Prevent duplicate cart lines from bypassing stock validation
     const stockKey = String(product.variant_id);
 
     requestedStock[stockKey] =
@@ -608,7 +614,7 @@ const validateOrderItems = async (items) => {
 
     if (requestedStock[stockKey] > availableStock) {
       throw new Error(
-        `${product.product_name} (${size}, ${color}) has insufficient stock.`
+        `${product.product_name} (${size}, ${color}): Insufficient stock. Available: ${availableStock}.`
       );
     }
 
@@ -616,7 +622,7 @@ const validateOrderItems = async (items) => {
       product_id: product.product_id,
       variant_id: product.variant_id,
       product_name: product.product_name,
-      product_image: null,
+      product_image: item.product_image || null,
       size: product.size,
       color: product.color,
       quantity,
@@ -627,6 +633,7 @@ const validateOrderItems = async (items) => {
 
   return validatedItems;
 };
+
 module.exports = {
   createOrder,
   validateOrderItems,

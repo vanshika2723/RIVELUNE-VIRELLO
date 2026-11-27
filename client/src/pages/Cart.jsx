@@ -1,4 +1,5 @@
 
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -9,6 +10,9 @@ import {
   Truck,
   Plus,
   Minus,
+  Tag,
+  X,
+  Check,
 } from "lucide-react";
 import { useCart } from "../context/CartContext";
 
@@ -21,21 +25,52 @@ export default function Cart() {
     removeFromCart,
     updateQuantity,
     cartTotal,
+    appliedCoupon,
+    applyCoupon,
+    removeCoupon,
+    discountAmount,
+    discountedTotal,
   } = useCart();
 
+  const [couponCode, setCouponCode] = useState("");
+  const [couponMessage, setCouponMessage] = useState("");
+  const [couponSuccess, setCouponSuccess] = useState(false);
+
   const shipping = cartTotal >= 10000 ? 0 : 500;
-  const grandTotal = cartTotal + shipping;
+  const grandTotal = discountedTotal + shipping;
 
   const totalItems = cartItems.reduce(
     (sum, item) => sum + item.quantity,
     0
   );
 
+  const handleApplyCoupon = () => {
+    if (!couponCode.trim()) {
+      setCouponSuccess(false);
+      setCouponMessage("Please enter a coupon code.");
+      return;
+    }
+
+    const result = applyCoupon(couponCode);
+
+    setCouponSuccess(result.success);
+    setCouponMessage(result.message);
+
+    if (result.success) {
+      setCouponCode("");
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    removeCoupon();
+    setCouponMessage("Coupon removed successfully.");
+    setCouponSuccess(false);
+  };
+
   // EMPTY CART
   if (cartItems.length === 0) {
     return (
-      <main className="min-h-screen bg-[#faf9f6] px-4 py-16 flex items-center justify-center">
-
+      <main className="flex min-h-screen items-center justify-center bg-[#faf9f6] px-4 py-16">
         <div className="w-full max-w-lg rounded-2xl border border-[#eeeae3] bg-white px-6 py-14 text-center shadow-sm">
 
           <div className="mx-auto mb-7 flex h-20 w-20 items-center justify-center rounded-full bg-[#f3eee5]">
@@ -50,7 +85,7 @@ export default function Cart() {
             YOUR SHOPPING BAG
           </span>
 
-          <h1 className="mt-5 font-serif text-3xl sm:text-4xl text-[#25231f]">
+          <h1 className="mt-5 font-serif text-3xl text-[#25231f] sm:text-4xl">
             Your bag is waiting.
           </h1>
 
@@ -106,10 +141,7 @@ export default function Cart() {
           </div>
 
           <div className="flex items-center gap-3">
-            <ShoppingBag
-              size={20}
-              className="text-[#a58b65]"
-            />
+            <ShoppingBag size={20} className="text-[#a58b65]" />
 
             <span className="text-xs font-semibold tracking-[0.15em] text-gray-500">
               {totalItems} {totalItems === 1 ? "ITEM" : "ITEMS"}
@@ -174,20 +206,18 @@ export default function Cart() {
                       <p className="mt-1 text-xs text-gray-500">
                         Size: {item.size}
                       </p>
+<span className="mt-3 text-sm font-semibold text-[#25231f]">
+  {formatPrice(item.price)}
+</span>
 
-                      <span className="mt-2 text-sm font-semibold text-[#25231f]">
-                        {formatPrice(item.price)}
-                      </span>
-
-                      <button
-                        onClick={() =>
-                          removeFromCart(item.id, item.size)
-                        }
-                        className="mt-3 inline-flex items-center gap-2 text-[10px] font-semibold tracking-wider text-gray-400 transition hover:text-red-500"
-                      >
-                        <Trash2 size={13} />
-                        REMOVE
-                      </button>
+<button
+  type="button"
+  onClick={() => removeFromCart(item.id, item.size)}
+  className="mt-4 flex items-center gap-2 rounded-md border border-[#eadfd8] bg-[#fff8f5] px-3 py-2 text-xs font-medium text-[#a34b3f] transition hover:bg-[#f8e8e3]"
+>
+  <Trash2 size={15} />
+  Remove Item
+</button>
 
                     </div>
                   </div>
@@ -202,6 +232,7 @@ export default function Cart() {
                     <div className="flex items-center rounded-full border border-[#e8e4dc] bg-[#fdfcfb]">
 
                       <button
+                        type="button"
                         onClick={() =>
                           updateQuantity(
                             item.id,
@@ -221,6 +252,7 @@ export default function Cart() {
                       </span>
 
                       <button
+                        type="button"
                         onClick={() =>
                           updateQuantity(
                             item.id,
@@ -299,6 +331,113 @@ export default function Cart() {
                     {formatPrice(cartTotal)}
                   </span>
                 </div>
+
+                {/* COUPON SECTION */}
+                <div className="rounded-xl border border-[#eeeae3] bg-[#fdfcfb] p-4">
+
+                  <div className="mb-3 flex items-center gap-2">
+                    <Tag size={17} className="text-[#a58b65]" />
+
+                    <h3 className="text-xs font-semibold tracking-[1px] text-[#25231f]">
+                      COUPON CODE
+                    </h3>
+                  </div>
+
+                  {appliedCoupon ? (
+                    <div className="rounded-lg border border-[#dce5d5] bg-[#f5f8f2] p-3">
+
+                      <div className="flex items-center justify-between gap-2">
+
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Check size={15} className="text-green-700" />
+
+                            <span className="text-sm font-semibold text-[#526b49]">
+                              {appliedCoupon.code}
+                            </span>
+                          </div>
+
+                          <p className="mt-1 text-[10px] text-[#66765c]">
+                            Coupon successfully applied
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleRemoveCoupon}
+                          aria-label="Remove coupon"
+                          className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition hover:bg-white hover:text-red-500"
+                        >
+                          <X size={16} />
+                        </button>
+
+                      </div>
+
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+
+                      <input
+                        type="text"
+                        value={couponCode}
+                        onChange={(e) => {
+                          setCouponCode(e.target.value.toUpperCase());
+                          setCouponMessage("");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            handleApplyCoupon();
+                          }
+                        }}
+                        placeholder="Enter coupon code"
+                        className="min-w-0 flex-1 rounded-lg border border-[#e8e4dc] bg-white px-3 py-3 text-xs uppercase outline-none transition placeholder:normal-case focus:border-[#a58b65]"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={handleApplyCoupon}
+                        className="rounded-lg bg-[#25231f] px-4 py-3 text-[10px] font-semibold tracking-wider text-white transition hover:bg-[#a58b65]"
+                      >
+                        APPLY
+                      </button>
+
+                    </div>
+                  )}
+
+                  {couponMessage && (
+                    <p
+                      className={`mt-3 text-[11px] ${
+                        couponSuccess
+                          ? "text-green-700"
+                          : "text-red-500"
+                      }`}
+                    >
+                      {couponMessage}
+                    </p>
+                  )}
+
+                  {!appliedCoupon && (
+                    <div className="mt-3 space-y-1 text-[10px] text-gray-400">
+                      <p>Try WELCOME10 for 10% off.</p>
+                      <p>RIVELUNE15 for 15% off.</p>
+                      <p>SAVE500 for PKR 500 off.</p>
+                    </div>
+                  )}
+
+                </div>
+
+                {/* DISCOUNT */}
+                {appliedCoupon && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500">
+                      Discount ({appliedCoupon.code})
+                    </span>
+
+                    <span className="font-semibold text-green-700">
+                      -{formatPrice(discountAmount)}
+                    </span>
+                  </div>
+                )}
 
                 {/* SHIPPING */}
                 <div className="flex items-center justify-between text-sm">

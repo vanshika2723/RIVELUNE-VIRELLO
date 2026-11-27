@@ -9,6 +9,7 @@ import {
   Menu,
   X,
   ArrowRight,
+  Heart,
 } from "lucide-react";
 
 export default function Navbar() {
@@ -16,7 +17,7 @@ export default function Navbar() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const { cartCount } = useCart();
+  const { cartCount, wishlistCount } = useCart();
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -67,7 +68,7 @@ export default function Navbar() {
           {/* LEFT SIDE */}
           <div className="flex items-center">
 
-            {/* MOBILE MENU BUTTON */}
+            {/* MOBILE MENU */}
             <button
               onClick={() => {
                 setMenuOpen(!menuOpen);
@@ -121,7 +122,7 @@ export default function Navbar() {
           {/* RIGHT SIDE */}
           <div className="flex items-center gap-4 sm:gap-6">
 
-            {/* SEARCH BUTTON */}
+            {/* SEARCH */}
             <button
               onClick={() => {
                 setSearchOpen(!searchOpen);
@@ -136,6 +137,25 @@ export default function Navbar() {
                 <Search size={21} strokeWidth={1.5} />
               )}
             </button>
+
+            {/* WISHLIST */}
+            <Link
+              to="/wishlist"
+              onClick={() => {
+                closeMenu();
+                setSearchOpen(false);
+              }}
+              className="relative flex items-center justify-center text-black transition hover:text-gray-500"
+              aria-label={`Wishlist with ${wishlistCount} items`}
+            >
+              <Heart size={22} strokeWidth={1.5} />
+
+              {wishlistCount > 0 && (
+                <span className="absolute -right-2 -top-2 flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-black px-1 text-[9px] font-medium text-white">
+                  {wishlistCount > 99 ? "99+" : wishlistCount}
+                </span>
+              )}
+            </Link>
 
             {/* CART */}
             <Link
@@ -168,10 +188,7 @@ export default function Navbar() {
               onSubmit={handleSearch}
               className="mx-auto flex max-w-3xl items-center gap-3 border-b border-gray-300 pb-3"
             >
-              <Search
-                size={19}
-                className="shrink-0 text-gray-500"
-              />
+              <Search size={19} className="shrink-0 text-gray-500" />
 
               <input
                 type="text"
@@ -248,6 +265,15 @@ export default function Navbar() {
                   {link.name}
                 </Link>
               ))}
+
+              <Link
+                to="/wishlist"
+                onClick={closeMenu}
+                className="flex items-center justify-between border-b border-gray-100 py-4 text-[11px] font-medium uppercase tracking-[2px] text-gray-600 hover:text-black"
+              >
+                Wishlist
+                {wishlistCount > 0 && `(${wishlistCount})`}
+              </Link>
 
               <Link
                 to="/about"

@@ -99,7 +99,21 @@ const placeOrder = async (req, res) => {
 
     // 6. Validate products using database prices and variants
     const orderItems = await validateOrderItems(items);
+console.log("========== ORDER DEBUG ==========");
+console.log(JSON.stringify(items, null, 2));
 
+items.forEach((item, index) => {
+  console.log(`ITEM ${index + 1}:`, {
+    product_id: item.product_id,
+    quantity: item.quantity,
+    size: item.size,
+    color: item.color,
+    product_id_type: typeof item.product_id,
+    quantity_type: typeof item.quantity,
+  });
+});
+
+console.log("=================================");
     // 7. Calculate subtotal
     const subtotal = orderItems.reduce(
       (total, item) => total + item.total_price,

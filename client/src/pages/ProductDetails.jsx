@@ -16,16 +16,20 @@ import products from "../data/products";
 
 export default function ProductDetails() {
   const { id } = useParams();
-  const { addToCart } = useCart();
+
+  const {
+    addToCart,
+    toggleWishlist,
+    isInWishlist,
+  } = useCart();
 
   const product = products.find(
-    (item) => item.id === Number(id)
+    (item) => String(item.id) === String(id)
   );
 
   const [selectedImage, setSelectedImage] = useState(0);
   const [selectedSize, setSelectedSize] = useState("");
   const [quantity, setQuantity] = useState(1);
-  const [wishlist, setWishlist] = useState(false);
   const [message, setMessage] = useState("");
 
   const formatPrice = (price) =>
@@ -33,7 +37,7 @@ export default function ProductDetails() {
 
   if (!product) {
     return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center px-5 text-center">
+      <div className="flex min-h-[70vh] flex-col items-center justify-center px-5 text-center">
         <h2 className="font-serif text-3xl text-stone-800">
           Product not found
         </h2>
@@ -44,13 +48,15 @@ export default function ProductDetails() {
 
         <Link
           to="/"
-          className="mt-7 bg-stone-900 px-8 py-3 text-xs tracking-[2px] text-white hover:bg-stone-700 transition"
+          className="mt-7 bg-stone-900 px-8 py-3 text-xs tracking-[2px] text-white transition hover:bg-stone-700"
         >
           RETURN TO HOMEPAGE
         </Link>
       </div>
     );
   }
+
+  const saved = isInWishlist(product.id);
 
   const discount = product.oldPrice
     ? Math.round(
@@ -71,18 +77,24 @@ export default function ProductDetails() {
     setMessage(`${product.name} added to your shopping bag!`);
   };
 
+  const handleWishlist = () => {
+    toggleWishlist(product);
+
+    setMessage(
+      saved
+        ? "Product removed from your wishlist."
+        : "Product added to your wishlist."
+    );
+  };
+
   return (
     <main className="min-h-screen bg-white px-4 py-8 text-stone-900 sm:px-8 lg:px-12 lg:py-12">
 
       <div className="mx-auto max-w-[1400px]">
 
         {/* Breadcrumb */}
-
         <div className="mb-8 flex flex-wrap items-center gap-2 text-[10px] tracking-[2px] text-stone-400">
-          <Link
-            to="/"
-            className="transition hover:text-stone-900"
-          >
+          <Link to="/" className="transition hover:text-stone-900">
             HOME
           </Link>
 
@@ -98,17 +110,15 @@ export default function ProductDetails() {
         </div>
 
         {/* Product Layout */}
-
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:gap-16">
 
           {/* Product Gallery */}
-
           <div>
 
             <div className="relative overflow-hidden bg-[#f4f1ec]">
 
               <img
-                src={product.images[selectedImage]}
+                src={product.images?.[selectedImage] || product.image}
                 alt={product.name}
                 className="h-[420px] w-full object-cover sm:h-[550px] lg:h-[680px]"
               />
@@ -120,12 +130,12 @@ export default function ProductDetails() {
             </div>
 
             {/* Thumbnails */}
-
             <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
 
-              {product.images.map((image, index) => (
+              {(product.images || [product.image]).map((image, index) => (
                 <button
-                  key={image}
+                  key={image || index}
+                  type="button"
                   onClick={() => setSelectedImage(index)}
                   aria-label={`View image ${index + 1}`}
                   className={`h-24 w-20 shrink-0 overflow-hidden border transition sm:h-28 sm:w-24 ${
@@ -146,7 +156,6 @@ export default function ProductDetails() {
           </div>
 
           {/* Product Information */}
-
           <div className="lg:sticky lg:top-24 lg:self-start">
 
             <p className="text-[10px] tracking-[3px] text-stone-400">
@@ -158,7 +167,6 @@ export default function ProductDetails() {
             </h1>
 
             {/* Price */}
-
             <div className="mt-6 flex flex-wrap items-center gap-4">
 
               <span className="text-xl font-medium">
@@ -186,7 +194,6 @@ export default function ProductDetails() {
             <div className="my-8 h-px bg-stone-200" />
 
             {/* Color */}
-
             <div className="flex items-center justify-between">
 
               <p className="text-sm">
@@ -207,7 +214,6 @@ export default function ProductDetails() {
             </div>
 
             {/* Size Selection */}
-
             <div className="mt-8">
 
               <div className="mb-4 flex items-center justify-between">
@@ -216,9 +222,12 @@ export default function ProductDetails() {
                   SELECT SIZE
                 </p>
 
-                <button className="text-[10px] tracking-wider text-stone-500 underline underline-offset-4 hover:text-black">
+                <Link
+                  to="/size-guide"
+                  className="text-[10px] tracking-wider text-stone-500 underline underline-offset-4 transition hover:text-black"
+                >
                   SIZE GUIDE
-                </button>
+                </Link>
 
               </div>
 
@@ -227,6 +236,7 @@ export default function ProductDetails() {
                 {product.sizes.map((size) => (
                   <button
                     key={size}
+                    type="button"
                     onClick={() => {
                       setSelectedSize(size);
                       setMessage("");
@@ -246,7 +256,6 @@ export default function ProductDetails() {
             </div>
 
             {/* Quantity */}
-
             <div className="mt-8 flex items-center justify-between">
 
               <span className="text-sm">
@@ -256,6 +265,7 @@ export default function ProductDetails() {
               <div className="flex h-11 items-center border border-stone-200">
 
                 <button
+                  type="button"
                   onClick={() =>
                     setQuantity((q) => Math.max(1, q - 1))
                   }
@@ -270,9 +280,8 @@ export default function ProductDetails() {
                 </span>
 
                 <button
-                  onClick={() =>
-                    setQuantity((q) => q + 1)
-                  }
+                  type="button"
+                  onClick={() => setQuantity((q) => q + 1)}
                   aria-label="Increase quantity"
                   className="flex h-full w-11 items-center justify-center text-stone-600 hover:bg-stone-100"
                 >
@@ -284,10 +293,10 @@ export default function ProductDetails() {
             </div>
 
             {/* Action Buttons */}
-
             <div className="mt-8 flex gap-3">
 
               <button
+                type="button"
                 onClick={handleAddToBag}
                 className="flex-1 bg-stone-900 px-5 py-4 text-[11px] font-medium tracking-[2px] text-white transition hover:bg-stone-700"
               >
@@ -296,24 +305,33 @@ export default function ProductDetails() {
               </button>
 
               <button
-                onClick={() => setWishlist(!wishlist)}
-                aria-label="Toggle wishlist"
+                type="button"
+                onClick={handleWishlist}
+                aria-label={
+                  saved
+                    ? "Remove from wishlist"
+                    : "Add to wishlist"
+                }
+                title={
+                  saved
+                    ? "Remove from wishlist"
+                    : "Add to wishlist"
+                }
                 className={`flex h-[54px] w-[56px] shrink-0 items-center justify-center border transition ${
-                  wishlist
-                    ? "border-stone-900 text-stone-900"
+                  saved
+                    ? "border-stone-900 text-red-600"
                     : "border-stone-200 text-stone-700 hover:border-stone-900"
                 }`}
               >
                 <Heart
                   size={20}
-                  fill={wishlist ? "currentColor" : "none"}
+                  fill={saved ? "currentColor" : "none"}
                 />
               </button>
 
             </div>
 
             {/* Message */}
-
             {message && (
               <div className="mt-4 flex items-center gap-2 bg-[#f5f2ed] p-4 text-sm text-stone-700">
                 <Check size={17} />
@@ -322,7 +340,6 @@ export default function ProductDetails() {
             )}
 
             {/* Description */}
-
             <div className="mt-9 border-t border-stone-200 pt-7">
 
               <p className="text-sm leading-7 text-stone-600">
@@ -332,7 +349,6 @@ export default function ProductDetails() {
             </div>
 
             {/* Specifications */}
-
             <div className="mt-7 space-y-4 border-t border-stone-200 pt-6">
 
               <div className="flex justify-between gap-5 text-sm">
@@ -359,7 +375,6 @@ export default function ProductDetails() {
             </div>
 
             {/* Services */}
-
             <div className="mt-8 space-y-5 border-t border-stone-200 pt-7">
 
               <div className="flex items-center gap-4 text-sm text-stone-600">

@@ -12,6 +12,7 @@ import NewArrivals from "./components/NewArrivals";
 import BrandBenefits from "./components/BrandBenefits";
 import Contact from "./pages/Contact";
 import Shop from "./pages/Shop";
+import Terms from "./pages/Terms";
 import Checkout from "./pages/Checkout";
 import ProductDetails from "./pages/ProductDetails";
 import Cart from "./pages/Cart";
@@ -20,6 +21,10 @@ import AdminPayments from "./pages/AdminPayments";
 import AdminLogin from "./pages/AdminLogin";
 import FAQ from "./pages/FAQ";
 import SizeGuide from "./pages/SizeGuide";
+import Wishlist from "./pages/Wishlist";
+import Returns from "./pages/Returns";
+import Shipping from "./pages/Shipping";
+import Privacy from "./pages/Privacy";
 
 function Home() {
   return (
@@ -49,12 +54,15 @@ export default function App() {
         <Route path="/shop/men" element={<Shop />} />
         <Route path="/shop/women" element={<Shop />} />
         <Route path="/shop/new-arrivals" element={<Shop />} />
-
+<Route path="/shipping" element={<Shipping />} />
+<Route path="/terms" element={<Terms />} />
         {/* Product Details */}
         <Route path="/product/:id" element={<ProductDetails />} />
-
+<Route path="/returns" element={<Returns />} />
+<Route path="/privacy" element={<Privacy />} />
         {/* Cart & Checkout */}
         <Route path="/cart" element={<Cart />} />
+        <Route path="/wishlist" element={<Wishlist />} />
         <Route path="/checkout" element={<Checkout />} />
 
         {/* Order Tracking */}

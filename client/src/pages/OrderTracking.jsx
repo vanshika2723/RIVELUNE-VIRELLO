@@ -17,7 +17,23 @@ const API_URL =
 
 const formatPrice = (price) =>
   `PKR ${Number(price || 0).toLocaleString("en-PK")}`;
+const formatHistoryDate = (date) => {
+  if (!date) return "Awaiting update";
 
+  const parsedDate = new Date(date);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "Awaiting update";
+  }
+
+  return parsedDate.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 const walletStatusSteps = [
   "Payment Verification Pending",
   "Pending Confirmation",
@@ -58,6 +74,12 @@ function OrderTracking() {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Return / Exchange states
+const [returnType, setReturnType] = useState("Return");
+const [returnReason, setReturnReason] = useState("");
+const [returnSubmitting, setReturnSubmitting] = useState(false);
+const [returnMessage, setReturnMessage] = useState("");
 
   const fetchOrder = async (orderNo, customerPhone) => {
     const response = await fetch(`${API_URL}/orders/lookup`, {
@@ -116,7 +138,47 @@ function OrderTracking() {
       setLoading(false);
     }
   };
+const handleReturnRequest = async (e) => {
+  e.preventDefault();
 
+  if (!order) return;
+
+  setReturnSubmitting(true);
+  setReturnMessage("");
+
+  try {
+    const response = await fetch(`${API_URL}/orders/return-request`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        order_id: order.id,
+        order_number: order.order_number,
+        customer_name: order.customer_name,
+        phone,
+        request_type: returnType,
+        reason: returnReason.trim(),
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Unable to submit request.");
+    }
+
+   setReturnMessage(data.message || "Your request has been submitted successfully.");
+setReturnReason("");
+
+const latestOrder = await fetchOrder(order.order_number, phone);
+setOrder(latestOrder);
+  } catch (err) {
+    setReturnMessage(err.message || "Something went wrong.");
+  } finally {
+    setReturnSubmitting(false);
+  }
+};
   const isWalletOrder =
     order &&
     ["easypaisa", "jazzcash"].includes(
@@ -135,7 +197,19 @@ function OrderTracking() {
     ["cancelled", "returned"].includes(
       order?.order_status?.toLowerCase()
     );
+// Return / Exchange eligibility
+const isDelivered =
+  order?.order_status?.toLowerCase().trim() === "delivered";
 
+const existingActiveReturnRequest =
+  order?.return_requests?.some((request) =>
+    ["pending", "approved"].includes(
+      request.request_status?.toLowerCase()
+    )
+  );
+
+const canRequestReturn =
+  isDelivered && !isCancelled && !existingActiveReturnRequest;
   return (
     <main className="min-h-screen bg-[#faf9f6] px-4 py-10 sm:px-6 lg:px-8">
 
@@ -338,112 +412,312 @@ function OrderTracking() {
             </div>
 
             {/* ORDER TIMELINE */}
-            <div className="border-t border-[#eeeae3] p-5 sm:p-7">
+          {/* ORDER TIMELINE */}
+<div className="border-t border-[#eeeae3] p-5 sm:p-7">
 
-              <div className="mb-7 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#f3eee5] text-[#a58b65]">
-                  <Truck size={20} />
-                </div>
+  <div className="mb-7 flex items-center gap-3">
+    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#f3eee5] text-[#a58b65]">
+      <Truck size={20} />
+    </div>
 
-                <div>
-                  <h3 className="font-serif text-2xl text-[#25231f]">
-                    Order Progress
-                  </h3>
+    <div>
+      <h3 className="font-serif text-2xl text-[#25231f]">
+        Order Progress
+      </h3>
+      <p className="mt-1 text-xs text-gray-400">
+        Follow your order journey with real-time status history.
+      </p>
+    </div>
+  </div>
 
-                  <p className="mt-1 text-xs text-gray-400">
-                    Follow your order journey.
-                  </p>
-                </div>
+  {isCancelled ? (
+    <div className="rounded-xl border border-red-100 bg-red-50 p-5 text-center">
+      <p className="text-sm font-semibold text-red-600">
+        {order.order_status}
+      </p>
+      <p className="mt-1 text-xs text-red-500">
+        This order is no longer progressing.
+      </p>
+    </div>
+  ) : (
+    <div className="space-y-0">
+      {activeStatusSteps.map((step, index) => {
+        const completed =
+          currentStatusIndex >= 0 &&
+          index <= currentStatusIndex;
+
+        const active = index === currentStatusIndex;
+
+        // Find actual history record for this status
+        const historyEntry = order.status_history?.find(
+          (entry) =>
+            entry.status?.toLowerCase().trim() ===
+            step.toLowerCase().trim()
+        );
+
+        return (
+          <div className="flex gap-4" key={step}>
+            {/* ICON + CONNECTOR */}
+            <div className="flex flex-col items-center">
+              <div
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
+                  completed
+                    ? "border-[#a58b65] bg-[#a58b65] text-white"
+                    : "border-[#e8e4dc] bg-white text-gray-400"
+                }`}
+              >
+                {completed ? (
+                  <CheckCircle2 size={17} />
+                ) : (
+                  index + 1
+                )}
               </div>
 
-              {isCancelled ? (
-                <div className="rounded-xl border border-red-100 bg-red-50 p-5 text-center">
-                  <p className="text-sm font-semibold text-red-600">
-                    {order.order_status}
-                  </p>
-
-                  <p className="mt-1 text-xs text-red-500">
-                    This order is no longer progressing.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-0">
-
-                  {activeStatusSteps.map((step, index) => {
-                    const completed =
-                      currentStatusIndex >= 0 &&
-                      index <= currentStatusIndex;
-
-                    const active =
-                      index === currentStatusIndex;
-
-                    return (
-                      <div className="flex gap-4" key={step}>
-
-                        <div className="flex flex-col items-center">
-
-                          <div
-                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition ${
-                              completed
-                                ? "border-[#a58b65] bg-[#a58b65] text-white"
-                                : "border-[#e8e4dc] bg-white text-gray-400"
-                            }`}
-                          >
-                            {completed ? (
-                              <CheckCircle2 size={17} />
-                            ) : (
-                              index + 1
-                            )}
-                          </div>
-
-                          {index !== activeStatusSteps.length - 1 && (
-                            <div
-                              className={`my-1 min-h-9 w-px ${
-                                completed
-                                  ? "bg-[#a58b65]"
-                                  : "bg-[#e8e4dc]"
-                              }`}
-                            />
-                          )}
-
-                        </div>
-
-                        <div className="pb-8 pt-2">
-                          <p
-                            className={`text-sm ${
-                              active
-                                ? "font-bold text-[#a58b65]"
-                                : completed
-                                ? "font-semibold text-[#25231f]"
-                                : "text-gray-400"
-                            }`}
-                          >
-                            {step}
-                          </p>
-
-                          {active && (
-                            <span className="mt-1 inline-block text-[10px] font-semibold tracking-wider text-[#a58b65]">
-                              CURRENT STATUS
-                            </span>
-                          )}
-                        </div>
-
-                      </div>
-                    );
-                  })}
-
-                </div>
+              {index !== activeStatusSteps.length - 1 && (
+                <div
+                  className={`my-1 min-h-9 w-px ${
+                    completed
+                      ? "bg-[#a58b65]"
+                      : "bg-[#e8e4dc]"
+                  }`}
+                />
               )}
-
-              {currentStatusIndex === -1 && !isCancelled && (
-                <p className="mt-3 rounded-lg bg-[#faf8f4] p-3 text-xs text-gray-500">
-                  Your order status has not yet matched a timeline step.
-                  Please refresh later.
-                </p>
-              )}
-
             </div>
 
+            {/* STATUS + DATE */}
+            <div className="pb-8 pt-2">
+              <p
+                className={`text-sm ${
+                  active
+                    ? "font-bold text-[#a58b65]"
+                    : completed
+                    ? "font-semibold text-[#25231f]"
+                    : "text-gray-400"
+                }`}
+              >
+                {step}
+              </p>
+
+              <p className="mt-1 text-xs text-gray-500">
+                {historyEntry
+                  ? formatHistoryDate(historyEntry.changed_at)
+                  : completed
+                  ? "Date unavailable"
+                  : "Awaiting update"}
+              </p>
+
+              {active && (
+                <span className="mt-2 inline-block rounded-full bg-[#f3eee5] px-3 py-1 text-[10px] font-semibold tracking-wider text-[#a58b65]">
+                  CURRENT STATUS
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  )}
+
+  {currentStatusIndex === -1 && !isCancelled && (
+    <p className="mt-3 rounded-lg bg-[#faf8f4] p-3 text-xs text-gray-500">
+      Your order status has not yet matched a timeline step.
+      Please refresh later.
+    </p>
+  )}
+
+</div>
+            {/* COURIER TRACKING DETAILS */}
+            {order.courier_name && order.tracking_number && (
+              <div className="border-t border-[#eeeae3] bg-[#faf8f4] p-5 sm:p-7">
+                <div className="mb-6 flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#f3eee5] text-[#a58b65]">
+                    <Truck size={20} />
+                  </div>
+
+                  <div>
+                    <h3 className="font-serif text-2xl text-[#25231f]">
+                      Shipment Details
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-400">
+                      Your order is on its delivery journey.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {/* COURIER NAME */}
+                  <div className="rounded-xl border border-[#eeeae3] bg-white p-4">
+                    <p className="text-[10px] font-semibold tracking-widest text-gray-400">
+                      COURIER PARTNER
+                    </p>
+
+                    <p className="mt-2 text-sm font-semibold text-[#25231f]">
+                      {order.courier_name}
+                    </p>
+                  </div>
+
+                  {/* TRACKING NUMBER */}
+                  <div className="rounded-xl border border-[#eeeae3] bg-white p-4">
+                    <p className="text-[10px] font-semibold tracking-widest text-gray-400">
+                      TRACKING NUMBER
+                    </p>
+
+                    <p className="mt-2 break-all text-sm font-semibold text-[#25231f]">
+                      {order.tracking_number}
+                    </p>
+                  </div>
+                </div>
+
+                {/* TRACK SHIPMENT BUTTON */}
+                {order.tracking_url &&
+                  /^https?:\/\/.+/i.test(order.tracking_url.trim()) && (
+                    <a
+                      href={order.tracking_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-5 flex w-full items-center justify-center gap-3 rounded-full bg-[#25231f] px-6 py-4 text-xs font-semibold tracking-[0.2em] text-white transition duration-300 hover:bg-[#a58b65]"
+                    >
+                      <Truck size={17} />
+                      TRACK SHIPMENT
+                    </a>
+                  )}
+              </div>
+            )}
+
+            {/* RETURN / EXCHANGE SECTION */}
+{isDelivered && !isCancelled && (
+  <div className="border-t border-[#eeeae3] bg-[#faf8f4] p-5 sm:p-7">
+    <div className="mb-6">
+      <span className="text-[10px] font-semibold tracking-[0.25em] text-[#a58b65]">
+        ORDER CARE
+      </span>
+
+      <h3 className="mt-2 font-serif text-2xl text-[#25231f]">
+        Returns & Exchanges
+      </h3>
+
+      <p className="mt-2 text-sm leading-6 text-gray-500">
+        If something isn't quite right, you can request a return
+        or exchange for your delivered order.
+      </p>
+    </div>
+
+    {/* EXISTING REQUESTS */}
+    {order.return_requests?.length > 0 && (
+      <div className="mb-6 space-y-3">
+        <h4 className="text-sm font-semibold text-[#25231f]">
+          Your Previous Requests
+        </h4>
+
+        {order.return_requests.map((request) => (
+          <div
+            key={request.id}
+            className="rounded-xl border border-[#eeeae3] bg-white p-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs font-semibold text-[#25231f]">
+                {request.request_type}
+              </span>
+
+              <span className="rounded-full bg-[#f3eee5] px-3 py-1 text-xs font-semibold text-[#a58b65]">
+                {request.request_status}
+              </span>
+            </div>
+
+            <p className="mt-2 text-sm text-gray-500">
+              {request.reason}
+            </p>
+
+            {request.admin_notes && (
+              <p className="mt-3 border-t border-[#eeeae3] pt-3 text-xs text-gray-500">
+                Admin note: {request.admin_notes}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    )}
+
+    {/* REQUEST FORM */}
+    {canRequestReturn ? (
+      <form onSubmit={handleReturnRequest} className="space-y-5">
+        {/* REQUEST TYPE */}
+        <div>
+          <label className="mb-2 block text-xs font-semibold tracking-wider text-gray-700">
+            REQUEST TYPE
+          </label>
+
+          <select
+            value={returnType}
+            onChange={(e) => setReturnType(e.target.value)}
+            className="w-full rounded-lg border border-[#e8e4dc] bg-white px-4 py-3.5 text-sm text-[#25231f] outline-none focus:border-[#a58b65]"
+          >
+            <option value="Return">Return</option>
+            <option value="Exchange">Exchange</option>
+          </select>
+        </div>
+
+        {/* REASON */}
+        <div>
+          <label className="mb-2 block text-xs font-semibold tracking-wider text-gray-700">
+            REASON
+          </label>
+
+          <textarea
+            value={returnReason}
+            onChange={(e) => setReturnReason(e.target.value)}
+            placeholder="Please explain why you want to return or exchange this order..."
+            rows={4}
+            maxLength={1000}
+            required
+            className="w-full resize-y rounded-lg border border-[#e8e4dc] bg-white px-4 py-3.5 text-sm text-[#25231f] outline-none placeholder:text-gray-400 focus:border-[#a58b65]"
+          />
+
+          <p className="mt-1 text-right text-xs text-gray-400">
+            {returnReason.length}/1000
+          </p>
+        </div>
+
+        {/* RESPONSE MESSAGE */}
+        {returnMessage && (
+          <div className="rounded-lg border border-[#eeeae3] bg-white p-4 text-sm text-[#78664e]">
+            {returnMessage}
+          </div>
+        )}
+
+        {/* SUBMIT */}
+        <button
+          type="submit"
+          disabled={returnSubmitting || !returnReason.trim()}
+          className="flex w-full items-center justify-center gap-3 rounded-full bg-[#25231f] px-6 py-4 text-xs font-semibold tracking-[0.2em] text-white transition hover:bg-[#a58b65] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {returnSubmitting ? (
+            <>
+              <LoaderCircle size={17} className="animate-spin" />
+              SUBMITTING...
+            </>
+          ) : (
+            `SUBMIT ${returnType.toUpperCase()} REQUEST`
+          )}
+        </button>
+      </form>
+    ) : (
+      !existingActiveReturnRequest &&
+      order.return_requests?.length === 0 && (
+        <div className="rounded-xl border border-[#eeeae3] bg-white p-4 text-sm text-gray-500">
+          Return or exchange request is not available for this order.
+        </div>
+      )
+    )}
+
+    {/* SUCCESS / ERROR MESSAGE AFTER SUBMISSION */}
+    {returnMessage && !canRequestReturn && (
+      <div className="mt-4 rounded-lg border border-[#eeeae3] bg-white p-4 text-sm text-[#78664e]">
+        {returnMessage}
+      </div>
+    )}
+  </div>
+)}
             {/* ORDERED ITEMS */}
             <div className="border-t border-[#eeeae3] p-5 sm:p-7">
 

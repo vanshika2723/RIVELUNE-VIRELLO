@@ -1,17 +1,23 @@
 
 const crypto = require("crypto");
-
-
 const {
   getOrderByOrderNumberAndPhone,
   getWalletPayments,
   getAdminPaymentAnalytics,
   getMonthlyPaymentAnalytics,
-  
+  getAllAdminOrders,
+  updateAdminOrderStatus,
+  updateCourierTracking,
+  getAllReturnRequests,
+updateReturnRequestStatus,
 } = require("../models/orderModel");
 const {
   createOrder,
   validateOrderItems,
+  createReturnRequest,
+  checkExistingReturnRequest,
+getReturnRequestsByOrderId,
+
 } = require("../models/orderModel");
 
 const fs = require("fs");
@@ -24,9 +30,10 @@ const {
 } = require("../models/paymentModel");
 
 
+
 const placeOrder = async (req, res) => {
   try {
-    const { customer, items, payment_method } = req.body;
+    const { customer, items, payment_method, coupon_code } = req.body;
 
     // 1. Validate customer details
     const requiredFields = [
@@ -50,9 +57,8 @@ const placeOrder = async (req, res) => {
       }
     }
 
-    // 2. Validate phone number
+    // 2. Validate phone
     const phone = String(customer.phone).replace(/[\s-]/g, "");
-
     const phoneRegex = /^(?:\+92|0)?3\d{9}$/;
 
     if (!phoneRegex.test(phone)) {
@@ -76,11 +82,7 @@ const placeOrder = async (req, res) => {
     }
 
     // 4. Validate payment method
-    const allowedPayments = [
-      "cod",
-      "easypaisa",
-      "jazzcash",
-    ];
+    const allowedPayments = ["cod", "easypaisa", "jazzcash"];
 
     if (!allowedPayments.includes(payment_method)) {
       return res.status(400).json({
@@ -99,37 +101,76 @@ const placeOrder = async (req, res) => {
 
     // 6. Validate products using database prices and variants
     const orderItems = await validateOrderItems(items);
-console.log("========== ORDER DEBUG ==========");
-console.log(JSON.stringify(items, null, 2));
 
-items.forEach((item, index) => {
-  console.log(`ITEM ${index + 1}:`, {
-    product_id: item.product_id,
-    quantity: item.quantity,
-    size: item.size,
-    color: item.color,
-    product_id_type: typeof item.product_id,
-    quantity_type: typeof item.quantity,
-  });
-});
-
-console.log("=================================");
-    // 7. Calculate subtotal
-    const subtotal = orderItems.reduce(
-      (total, item) => total + item.total_price,
-      0
+    // 7. Calculate subtotal using database prices
+    const subtotal = Number(
+      orderItems
+        .reduce((total, item) => total + item.total_price, 0)
+        .toFixed(2)
     );
 
-    // 8. Calculate shipping
+    // 8. Server-side coupon validation
+    const coupons = {
+      WELCOME10: {
+        type: "percentage",
+        value: 10,
+        minOrder: 2000,
+      },
+      RIVELUNE15: {
+        type: "percentage",
+        value: 15,
+        minOrder: 5000,
+      },
+      SAVE500: {
+        type: "fixed",
+        value: 500,
+        minOrder: 3000,
+      },
+    };
+
+    const normalizedCoupon = String(coupon_code || "")
+      .trim()
+      .toUpperCase();
+
+    let validCoupon = null;
+    let discount_amount = 0;
+
+    if (normalizedCoupon) {
+      validCoupon = coupons[normalizedCoupon];
+
+      if (!validCoupon) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid coupon code.",
+        });
+      }
+
+      if (subtotal < validCoupon.minOrder) {
+        return res.status(400).json({
+          success: false,
+          message: `Minimum order of PKR ${validCoupon.minOrder.toLocaleString("en-PK")} required for ${normalizedCoupon}.`,
+        });
+      }
+
+      discount_amount =
+        validCoupon.type === "percentage"
+          ? Math.round((subtotal * validCoupon.value) / 100)
+          : Math.min(validCoupon.value, subtotal);
+    }
+
+    // 9. Calculate shipping
     const shipping_fee = subtotal >= 10000 ? 0 : 500;
 
-    const total_amount = subtotal + shipping_fee;
+    // 10. Calculate final total
+    const total_amount = Number(
+      Math.max(0, subtotal - discount_amount + shipping_fee).toFixed(2)
+    );
 
-    // 9. Generate unique order number
+    // 11. Generate unique order number
     const orderNumber =
       `RIV-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 
-    // 10. Prepare order data
+    // 12. Prepare order data
     const orderData = {
       order_number: orderNumber,
       customer_name: String(customer.name).trim(),
@@ -142,14 +183,16 @@ console.log("=================================");
       order_notes: String(customer.order_notes || "").trim(),
       payment_method,
       subtotal,
+      coupon_code: validCoupon ? normalizedCoupon : null,
+      discount_amount,
       shipping_fee,
       total_amount,
     };
 
-    // 11. Save order and update stock atomically
+    // 13. Save order and update stock atomically
     const savedOrder = await createOrder(orderData, orderItems);
 
-    // 12. Return successful response
+    // 14. Return successful response
     return res.status(201).json({
       success: true,
       message: "Order placed successfully!",
@@ -158,6 +201,8 @@ console.log("=================================");
         order_number: savedOrder.order_number,
         payment_method,
         subtotal,
+        coupon_code: validCoupon ? normalizedCoupon : null,
+        discount_amount,
         shipping_fee,
         total_amount,
         order_status: "Pending Confirmation",
@@ -167,7 +212,6 @@ console.log("=================================");
             : "Payment Verification Pending",
       },
     });
-
   } catch (error) {
     console.error("Place order error:", error);
 
@@ -181,11 +225,12 @@ console.log("=================================");
       "Invalid product price",
       "selected size or color",
       "Stock update failed",
+      "Invalid order item",
+      "missing",
     ];
 
-    const isValidationError = validationErrors.some(
-      (message) =>
-        error.message.toLowerCase().includes(message.toLowerCase())
+    const isValidationError = validationErrors.some((message) =>
+      error.message.toLowerCase().includes(message.toLowerCase())
     );
 
     return res.status(isValidationError ? 409 : 500).json({
@@ -221,10 +266,16 @@ const lookupOrder = async (req, res) => {
       });
     }
 
+    // Fetch existing Return / Exchange requests
+    const returnRequests = await getReturnRequestsByOrderId(order.id);
+
     return res.status(200).json({
       success: true,
       message: "Order found successfully.",
-      order,
+      order: {
+        ...order,
+        return_requests: returnRequests,
+      },
     });
   } catch (error) {
     console.error("Order lookup error:", error.message);
@@ -235,7 +286,6 @@ const lookupOrder = async (req, res) => {
     });
   }
 };
-
 const submitPayment = async (req, res) => {
   try {
     const { order_number, phone, transaction_id } = req.body;
@@ -630,6 +680,286 @@ const getValidatedOrderItems = async (items) => {
 
   return validatedItems;
 };
+// ========================================
+// GET ALL ORDERS FOR ADMIN
+// ========================================
+const getAllAdminOrdersController = async (req, res) => {
+  try {
+    const orders = await getAllAdminOrders();
+
+    return res.status(200).json({
+      success: true,
+      count: orders.length,
+      orders,
+    });
+  } catch (error) {
+    console.error("Admin orders fetch error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch orders.",
+    });
+  }
+};
+// ========================================
+// UPDATE ADMIN ORDER STATUS
+// ========================================
+const updateAdminOrderStatusController = async (req, res) => {
+  try {
+    const { orderId, status } = req.body;
+
+    const allowedStatuses = [
+      "Pending Confirmation",
+      "Confirmed",
+      "Processing",
+      "Dispatched",
+      "Out for Delivery",
+      "Delivered",
+      "Cancelled",
+      "Returned",
+    ];
+
+    if (!orderId || !status) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID and status are required.",
+      });
+    }
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order status.",
+      });
+    }
+
+    const result = await updateAdminOrderStatus(orderId, status);
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Order status updated successfully.",
+    });
+  } catch (error) {
+    console.error("Order status update error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update order status.",
+    });
+  }
+};
+
+// ========================================
+// UPDATE COURIER TRACKING DETAILS (ADMIN)
+// ========================================
+const updateCourierTrackingController = async (req, res) => {
+  try {
+    const { orderId, courier_name, tracking_number, tracking_url } = req.body;
+
+    const id = Number(orderId);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid order ID is required.",
+      });
+    }
+
+    if (!courier_name?.trim() || !tracking_number?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Courier name and tracking number are required.",
+      });
+    }
+
+    if (tracking_url && !/^https?:\/\/.+/i.test(tracking_url.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid tracking URL.",
+      });
+    }
+
+    const result = await updateCourierTracking(id, {
+      courier_name: courier_name.trim(),
+      tracking_number: tracking_number.trim(),
+      tracking_url: tracking_url?.trim() || null,
+    });
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Courier tracking details updated successfully.",
+    });
+  } catch (error) {
+    console.error("Courier tracking update error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update courier tracking details.",
+    });
+  }
+};
+
+// ========================================
+// CUSTOMER RETURN / EXCHANGE REQUEST
+// ========================================
+// ========================================
+// CUSTOMER RETURN / EXCHANGE REQUEST
+// SECURE ORDER VERIFICATION
+// ========================================
+const submitReturnRequestController = async (req, res) => {
+  try {
+    const {
+      order_number,
+      phone,
+      request_type,
+      reason,
+    } = req.body;
+
+    // Required fields validation
+    if (
+      !order_number?.trim() ||
+      !phone?.trim() ||
+      !request_type ||
+      !reason?.trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Order number, phone, request type and reason are required.",
+      });
+    }
+
+    // Request type validation
+    if (!["Return", "Exchange"].includes(request_type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid request type. Choose Return or Exchange.",
+      });
+    }
+
+    // Verify order using order number + phone
+    const order = await getOrderByOrderNumberAndPhone(
+      order_number.trim(),
+      phone.trim()
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found. Please check your order number and phone.",
+      });
+    }
+
+    // Only Delivered orders are eligible
+    if (order.order_status?.toLowerCase().trim() !== "delivered") {
+      return res.status(400).json({
+        success: false,
+        message: "Return or Exchange is only available for delivered orders.",
+      });
+    }
+// Prevent duplicate active return / exchange requests
+const existingRequest = await checkExistingReturnRequest(order.id);
+
+if (existingRequest) {
+  return res.status(409).json({
+    success: false,
+    message: `You already have an active ${existingRequest.request_type} request for this order.`,
+  });
+}
+    // Save verified server-side order information
+    const result = await createReturnRequest({
+      order_id: order.id,
+      order_number: order.order_number,
+      customer_name: order.customer_name,
+      phone: order.phone,
+      request_type,
+      reason: reason.trim(),
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: `${request_type} request submitted successfully.`,
+      requestId: result.insertId,
+    });
+  } catch (error) {
+    console.error("Return request error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit return request.",
+    });
+  }
+};
+
+const getAdminReturnRequestsController = async (req, res) => {
+  try {
+    const requests = await getAllReturnRequests();
+
+    res.status(200).json({
+      success: true,
+      requests,
+    });
+  } catch (error) {
+    console.error("Get Admin Return Requests Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch return requests.",
+    });
+  }
+};
+
+const updateAdminReturnRequestController = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { request_status, admin_notes } = req.body;
+
+    const allowedStatuses = ["Approved", "Rejected", "Completed"];
+
+    if (!allowedStatuses.includes(request_status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid return request status.",
+      });
+    }
+
+    const result = await updateReturnRequestStatus(
+      id,
+      request_status,
+      admin_notes || ""
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({
+        success: false,
+        message: "Return request not found.",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Return request updated successfully.",
+    });
+  } catch (error) {
+    console.error("Update Admin Return Request Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update return request.",
+    });
+  }
+};
 module.exports = {
   placeOrder,
   lookupOrder,
@@ -640,4 +970,10 @@ module.exports = {
   viewPaymentProof,
   getAdminPaymentAnalyticsController,
   getMonthlyPaymentAnalyticsController,
+  getAllAdminOrdersController,
+  updateAdminOrderStatusController,
+  updateCourierTrackingController,
+  submitReturnRequestController,
+  getAdminReturnRequestsController,
+updateAdminReturnRequestController,
 };

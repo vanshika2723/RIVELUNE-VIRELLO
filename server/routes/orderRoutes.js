@@ -1,4 +1,4 @@
-
+const adminAuth = require("../middleware/adminAuth");
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
@@ -8,6 +8,10 @@ const {
   lookupOrder,
   submitPayment,
   rejectPayment,
+  updateCourierTrackingController,
+  submitReturnRequestController,
+  getAdminReturnRequestsController,
+updateAdminReturnRequestController,
 } = require("../controllers/orderController");
 const paymentUpload = require("../config/paymentUpload");
 
@@ -16,6 +20,9 @@ router.post("/", placeOrder);
 
 // Guest order lookup
 router.post("/lookup", lookupOrder);
+
+// Customer Return / Exchange Request
+router.post("/return-request", submitReturnRequestController);
 
 // Submit wallet payment proof
 
@@ -45,6 +52,18 @@ router.post(
 );
 
 // Admin payment rejection route - disabled until authentication is implemented
-// router.post("/reject-payment", rejectPayment);
+router.post("/reject-payment", rejectPayment);
+// Admin: Update courier tracking details
+router.put("/admin/courier-tracking", adminAuth, updateCourierTrackingController);
+router.get(
+  "/admin/return-requests",
+  adminAuth,
+  getAdminReturnRequestsController
+);
 
+router.put(
+  "/admin/return-requests/:id",
+  adminAuth,
+  updateAdminReturnRequestController
+);
 module.exports = router;

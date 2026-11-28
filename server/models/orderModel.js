@@ -2,6 +2,7 @@
 const db = require("../config/db");
 
 // Create order and decrement stock atomically
+
 const createOrder = async (orderData, items) => {
   const connection = await new Promise((resolve, reject) => {
     db.getConnection((err, conn) => {
@@ -35,6 +36,10 @@ const createOrder = async (orderData, items) => {
 
       if (!Number.isInteger(variantId) || variantId <= 0) {
         throw new Error("Invalid product variant.");
+      }
+
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        throw new Error("Invalid product quantity.");
       }
 
       stockRequirements[variantId] =
@@ -93,7 +98,7 @@ const createOrder = async (orderData, items) => {
       }
     }
 
-    // Insert order
+    // Insert order including coupon information
     const orderQuery = `
       INSERT INTO orders (
         order_number,
@@ -107,10 +112,12 @@ const createOrder = async (orderData, items) => {
         order_notes,
         payment_method,
         subtotal,
+        coupon_code,
+        discount_amount,
         shipping_fee,
         total_amount
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const orderValues = [
@@ -125,6 +132,8 @@ const createOrder = async (orderData, items) => {
       orderData.order_notes || null,
       orderData.payment_method,
       orderData.subtotal,
+      orderData.coupon_code || null,
+      orderData.discount_amount || 0,
       orderData.shipping_fee,
       orderData.total_amount,
     ];
@@ -184,6 +193,7 @@ const createOrder = async (orderData, items) => {
     connection.release();
   }
 };
+
 // Find an order using order number and customer phone
 const getOrderByOrderNumberAndPhone = (orderNumber, phone) => {
   return new Promise((resolve, reject) => {
@@ -195,9 +205,7 @@ const getOrderByOrderNumberAndPhone = (orderNumber, phone) => {
     `;
 
     db.query(query, [orderNumber, phone], (err, results) => {
-      if (err) {
-        return reject(err);
-      }
+      if (err) return reject(err);
 
       if (results.length === 0) {
         return resolve(null);
@@ -205,7 +213,7 @@ const getOrderByOrderNumberAndPhone = (orderNumber, phone) => {
 
       const order = results[0];
 
-      // Fetch products belonging to this order
+      // Fetch order items
       const itemsQuery = `
         SELECT product_name, product_image, size, color,
                quantity, unit_price, total_price
@@ -214,13 +222,24 @@ const getOrderByOrderNumberAndPhone = (orderNumber, phone) => {
       `;
 
       db.query(itemsQuery, [order.id], (itemsError, items) => {
-        if (itemsError) {
-          return reject(itemsError);
-        }
+        if (itemsError) return reject(itemsError);
 
-        resolve({
-          ...order,
-          items,
+        // Fetch order status history
+        const historyQuery = `
+          SELECT status, note, changed_at
+          FROM order_status_history
+          WHERE order_id = ?
+          ORDER BY changed_at ASC, id ASC
+        `;
+
+        db.query(historyQuery, [order.id], (historyError, history) => {
+          if (historyError) return reject(historyError);
+
+          resolve({
+            ...order,
+            items,
+            status_history: history,
+          });
         });
       });
     });
@@ -271,99 +290,224 @@ const getWalletPayments = (paymentStatus = null) => {
 // ========================================
 
 // Get payment analytics summary
+// Get payment analytics for admin dashboard
 const getAdminPaymentAnalytics = () => {
-  return new Promise((resolve, reject) => {
-    const summaryQuery = `
-      SELECT
-        COUNT(*) AS total_orders,
-        COALESCE(SUM(total_amount), 0) AS total_order_value,
-
-        SUM(
-          CASE
-            WHEN payment_method IN ('easypaisa', 'jazzcash')
-            AND payment_status = 'Payment Verified'
-            THEN total_amount
-            ELSE 0
-          END
-        ) AS verified_wallet_revenue,
-
-        SUM(
-          CASE
-            WHEN payment_method IN ('easypaisa', 'jazzcash')
-            AND payment_status = 'Payment Verification Pending'
-            THEN 1
-            ELSE 0
-          END
-        ) AS pending_payments,
-
-        SUM(
-          CASE
-            WHEN payment_method IN ('easypaisa', 'jazzcash')
-            AND payment_status = 'Payment Verified'
-            THEN 1
-            ELSE 0
-          END
-        ) AS verified_payments,
-
-        SUM(
-          CASE
-            WHEN payment_method IN ('easypaisa', 'jazzcash')
-            AND payment_status = 'Payment Rejected'
-            THEN 1
-            ELSE 0
-          END
-        ) AS rejected_payments
-
-      FROM orders
-    `;
-
-    const methodsQuery = `
-      SELECT
-        payment_method,
-        COUNT(*) AS total_orders,
-        COALESCE(SUM(total_amount), 0) AS total_amount
-      FROM orders
-      GROUP BY payment_method
-      ORDER BY total_orders DESC
-    `;
-
-    const trendQuery = `
-      SELECT
-        DATE(created_at) AS date,
-        COUNT(*) AS total_orders,
-        COALESCE(SUM(total_amount), 0) AS total_amount
-      FROM orders
-      WHERE created_at >= CURDATE() - INTERVAL 6 DAY
-      GROUP BY DATE(created_at)
-      ORDER BY date ASC
-    `;
-
-    db.query(summaryQuery, (summaryError, summaryResults) => {
-      if (summaryError) {
-        return reject(summaryError);
-      }
-
-      db.query(methodsQuery, (methodsError, methodsResults) => {
-        if (methodsError) {
-          return reject(methodsError);
-        }
-
-        db.query(trendQuery, (trendError, trendResults) => {
-          if (trendError) {
-            return reject(trendError);
-          }
-
-          resolve({
-            summary: summaryResults[0],
-            paymentMethods: methodsResults,
-            dailyTrend: trendResults,
+  return new Promise(async (resolve, reject) => {
+    try {
+      const runQuery = (sql) =>
+        new Promise((queryResolve, queryReject) => {
+          db.query(sql, (err, results) => {
+            if (err) return queryReject(err);
+            queryResolve(results);
           });
         });
+
+      // 1. Main summary
+      const summaryQuery = `
+        SELECT
+          COUNT(*) AS total_orders,
+
+          COALESCE(SUM(total_amount), 0) AS total_order_value,
+
+          COALESCE(
+            SUM(
+              CASE
+                WHEN payment_method IN ('easypaisa', 'jazzcash')
+                AND payment_status = 'Payment Verified'
+                THEN total_amount
+                ELSE 0
+              END
+            ), 0
+          ) AS verified_wallet_revenue,
+
+          COALESCE(
+            SUM(
+              CASE
+                WHEN payment_method IN ('easypaisa', 'jazzcash')
+                AND payment_status = 'Payment Verification Pending'
+                THEN 1
+                ELSE 0
+              END
+            ), 0
+          ) AS pending_payments,
+
+          COALESCE(
+            SUM(
+              CASE
+                WHEN payment_method IN ('easypaisa', 'jazzcash')
+                AND payment_status = 'Payment Verified'
+                THEN 1
+                ELSE 0
+              END
+            ), 0
+          ) AS verified_payments,
+
+          COALESCE(
+            SUM(
+              CASE
+                WHEN payment_method IN ('easypaisa', 'jazzcash')
+                AND payment_status = 'Payment Rejected'
+                THEN 1
+                ELSE 0
+              END
+            ), 0
+          ) AS rejected_payments,
+
+          COUNT(
+            DISTINCT COALESCE(
+              NULLIF(email, ''),
+              NULLIF(phone, '')
+            )
+          ) AS total_customers,
+
+          COALESCE(
+            AVG(total_amount), 0
+          ) AS average_order_value,
+
+          COALESCE(
+            SUM(discount_amount), 0
+          ) AS total_discount_given,
+
+          COALESCE(
+            SUM(
+              CASE
+                WHEN coupon_code IS NOT NULL
+                AND coupon_code != ''
+                THEN 1
+                ELSE 0
+              END
+            ), 0
+          ) AS coupon_orders
+
+        FROM orders
+      `;
+
+      // 2. Payment methods breakdown
+      const methodsQuery = `
+        SELECT
+          payment_method,
+          COUNT(*) AS total_orders,
+          COALESCE(SUM(total_amount), 0) AS total_amount
+        FROM orders
+        GROUP BY payment_method
+        ORDER BY total_orders DESC
+      `;
+
+      // 3. Last 7 days trend
+      const trendQuery = `
+        SELECT
+          DATE(created_at) AS date,
+          COUNT(*) AS total_orders,
+          COALESCE(SUM(total_amount), 0) AS total_amount
+        FROM orders
+        WHERE created_at >= CURDATE() - INTERVAL 6 DAY
+        GROUP BY DATE(created_at)
+        ORDER BY date ASC
+      `;
+
+      // 4. Coupon analytics
+      const couponQuery = `
+        SELECT
+          coupon_code,
+          COUNT(*) AS total_uses,
+          COALESCE(SUM(discount_amount), 0) AS total_discount,
+          COALESCE(SUM(total_amount), 0) AS total_revenue
+        FROM orders
+        WHERE coupon_code IS NOT NULL
+          AND coupon_code != ''
+        GROUP BY coupon_code
+        ORDER BY total_uses DESC
+      `;
+
+      // 5. Top selling products
+      const topProductsQuery = `
+        SELECT
+          product_id,
+          product_name,
+          COALESCE(SUM(quantity), 0) AS total_sold,
+          COALESCE(SUM(total_price), 0) AS total_revenue
+        FROM order_items
+        GROUP BY product_id, product_name
+        ORDER BY total_sold DESC
+        LIMIT 5
+      `;
+
+      const [
+        summaryResults,
+        methodsResults,
+        trendResults,
+        couponResults,
+        topProductsResults,
+      ] = await Promise.all([
+        runQuery(summaryQuery),
+        runQuery(methodsQuery),
+        runQuery(trendQuery),
+        runQuery(couponQuery),
+        runQuery(topProductsQuery),
+      ]);
+
+      resolve({
+        summary: summaryResults[0],
+        paymentMethods: methodsResults,
+        dailyTrend: trendResults,
+        couponAnalytics: couponResults,
+        topProducts: topProductsResults,
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+};
+// ========================================
+// GET ALL ORDERS FOR ADMIN
+// ========================================
+const getAllAdminOrders = () => {
+  return new Promise((resolve, reject) => {
+    const ordersQuery = `
+      SELECT *
+      FROM orders
+      ORDER BY created_at DESC
+    `;
+
+    db.query(ordersQuery, (err, orders) => {
+      if (err) return reject(err);
+
+      if (!orders.length) {
+        return resolve([]);
+      }
+
+      const orderIds = orders.map((order) => order.id);
+      const placeholders = orderIds.map(() => "?").join(",");
+
+      const itemsQuery = `
+        SELECT *
+        FROM order_items
+        WHERE order_id IN (${placeholders})
+      `;
+
+      db.query(itemsQuery, orderIds, (itemsError, items) => {
+        if (itemsError) return reject(itemsError);
+
+        const itemsMap = {};
+
+        items.forEach((item) => {
+          if (!itemsMap[item.order_id]) {
+            itemsMap[item.order_id] = [];
+          }
+
+          itemsMap[item.order_id].push(item);
+        });
+
+        const ordersWithItems = orders.map((order) => ({
+          ...order,
+          items: itemsMap[order.id] || [],
+        }));
+
+        resolve(ordersWithItems);
       });
     });
   });
 };
-
 // ========================================
 // MONTHLY PAYMENT ANALYTICS
 // ========================================
@@ -633,7 +777,255 @@ const validateOrderItems = async (items) => {
 
   return validatedItems;
 };
+// ========================================
+// UPDATE ORDER STATUS
+// ========================================
+const updateAdminOrderStatus = (orderId, status) => {
+  return new Promise((resolve, reject) => {
+    db.getConnection((connectionError, connection) => {
+      if (connectionError) return reject(connectionError);
 
+      connection.beginTransaction((transactionError) => {
+        if (transactionError) {
+          connection.release();
+          return reject(transactionError);
+        }
+
+        const updateSql = `
+          UPDATE orders
+          SET order_status = ?
+          WHERE id = ?
+        `;
+
+        connection.query(updateSql, [status, orderId], (updateError, result) => {
+          if (updateError) {
+            return connection.rollback(() => {
+              connection.release();
+              reject(updateError);
+            });
+          }
+
+          if (result.affectedRows === 0) {
+            // Same status or missing order: verify order exists
+            const checkSql = `SELECT id FROM orders WHERE id = ?`;
+
+            connection.query(checkSql, [orderId], (checkError, rows) => {
+              if (checkError) {
+                return connection.rollback(() => {
+                  connection.release();
+                  reject(checkError);
+                });
+              }
+
+              if (rows.length === 0) {
+                return connection.rollback(() => {
+                  connection.release();
+                  resolve(null);
+                });
+              }
+
+              // Order exists but status was unchanged, so no history duplicate
+              return connection.commit((commitError) => {
+                connection.release();
+
+                if (commitError) return reject(commitError);
+                resolve(result);
+              });
+            });
+
+            return;
+          }
+
+          const historySql = `
+            INSERT INTO order_status_history
+              (order_id, status, note, changed_at)
+            VALUES (?, ?, ?, NOW())
+          `;
+
+          connection.query(
+            historySql,
+            [orderId, status, `Status updated to ${status}`],
+            (historyError) => {
+              if (historyError) {
+                return connection.rollback(() => {
+                  connection.release();
+                  reject(historyError);
+                });
+              }
+
+              connection.commit((commitError) => {
+                connection.release();
+
+                if (commitError) return reject(commitError);
+                resolve(result);
+              });
+            }
+          );
+        });
+      });
+    });
+  });
+};
+
+// ========================================
+// UPDATE COURIER TRACKING DETAILS
+// ========================================
+const updateCourierTracking = (orderId, courierData) => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      UPDATE orders
+      SET courier_name = ?,
+          tracking_number = ?,
+          tracking_url = ?
+      WHERE id = ?
+    `;
+
+    db.query(
+      query,
+      [
+        courierData.courier_name || null,
+        courierData.tracking_number || null,
+        courierData.tracking_url || null,
+        orderId,
+      ],
+      (err, result) => {
+        if (err) return reject(err);
+
+        if (result.affectedRows === 0) {
+          return db.query(
+            "SELECT id FROM orders WHERE id = ?",
+            [orderId],
+            (checkError, rows) => {
+              if (checkError) return reject(checkError);
+              resolve(rows.length > 0 ? { unchanged: true } : null);
+            }
+          );
+        }
+
+        resolve(result);
+      }
+    );
+  });
+};
+
+// ========================================
+// CREATE CUSTOMER RETURN / EXCHANGE REQUEST
+// ========================================
+const createReturnRequest = (requestData) => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      INSERT INTO order_return_requests (
+        order_id,
+        order_number,
+        customer_name,
+        phone,
+        request_type,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `;
+
+    db.query(
+      query,
+      [
+        requestData.order_id,
+        requestData.order_number,
+        requestData.customer_name,
+        requestData.phone,
+        requestData.request_type,
+        requestData.reason,
+      ],
+      (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      }
+    );
+  });
+};
+
+// ========================================
+// CHECK EXISTING RETURN / EXCHANGE REQUEST
+// ========================================
+const checkExistingReturnRequest = (orderId) => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT id, request_type, request_status
+      FROM order_return_requests
+      WHERE order_id = ?
+      AND request_status IN ('Pending', 'Approved')
+      LIMIT 1
+    `;
+
+    db.query(query, [orderId], (err, results) => {
+      if (err) return reject(err);
+      resolve(results[0] || null);
+    });
+  });
+};
+
+// ========================================
+// GET RETURN / EXCHANGE REQUESTS FOR ORDER
+// ========================================
+const getReturnRequestsByOrderId = (orderId) => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT id, request_type, reason, request_status, admin_notes, created_at, updated_at
+      FROM order_return_requests
+      WHERE order_id = ?
+      ORDER BY created_at DESC
+    `;
+
+    db.query(query, [orderId], (err, results) => {
+      if (err) return reject(err);
+      resolve(results);
+    });
+  });
+};
+
+// ========================================
+// GET ALL RETURN / EXCHANGE REQUESTS (ADMIN)
+// ========================================
+const getAllReturnRequests = () => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT *
+      FROM order_return_requests
+      ORDER BY created_at DESC
+    `;
+
+    db.query(query, (err, rows) => {
+      if (err) return reject(err);
+      resolve(rows);
+    });
+  });
+};
+
+// ========================================
+// UPDATE RETURN / EXCHANGE REQUEST STATUS
+// ========================================
+const updateReturnRequestStatus = (
+  requestId,
+  requestStatus,
+  adminNotes
+) => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      UPDATE order_return_requests
+      SET request_status = ?,
+          admin_notes = ?
+      WHERE id = ?
+    `;
+
+    db.query(
+      query,
+      [requestStatus, adminNotes, requestId],
+      (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      }
+    );
+  });
+};
 module.exports = {
   createOrder,
   validateOrderItems,
@@ -641,4 +1033,12 @@ module.exports = {
   getWalletPayments,
   getAdminPaymentAnalytics,
   getMonthlyPaymentAnalytics,
+  getAllAdminOrders,
+  updateAdminOrderStatus,
+  updateCourierTracking,
+  createReturnRequest,
+  checkExistingReturnRequest,
+  getReturnRequestsByOrderId,
+    getAllReturnRequests,
+  updateReturnRequestStatus,
 };

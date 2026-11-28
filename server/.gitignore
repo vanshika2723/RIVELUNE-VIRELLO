@@ -1,0 +1,30 @@
+
+
+# Dependencies
+node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Uploads - Private customer payment proofs
+/uploads/payment-proofs/*
+!/uploads/payment-proofs/.gitkeep
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Temporary files
+*.tmp
+*.bak
+
+# Coverage and cache
+coverage/
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
